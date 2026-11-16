@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Result } from '../db';
 import type { ExtTest } from '../db';
 import { composeExternal, composeSession, decideLevel, extPriority, rankExternal, streak } from '../domain/adaptive';
+import { type BiaPack, biaExercise, dueIds, LEITNER_DAYS, partStatus, srsUpdate, validatePack } from '../domain/bia';
 import { SEED } from '../domain/catalog';
 import { alter } from './attention';
 import { buildMatrix, cascade, dialBoard, NUMBER_LAWS, readDial, signedSum, WORD_LAWS } from './critical';
@@ -312,5 +313,93 @@ describe('exercices ciblés', () => {
   it('sprint : durée fixe et réserve d’items suffisante', () => {
     expect(EXERCISES['calc-sprint'].timeLimitS).toBe(90);
     expect(EXERCISES['calc-sprint'].generate(1).length).toBeGreaterThanOrEqual(100);
+  });
+});
+
+describe('module BIA', () => {
+  // pack fictif, réservé aux tests : aucun contenu du livret
+  const mk = (chapters: number, perPart = 12): BiaPack => ({
+    format: 'cap-cadets-bia', version: 1, id: 'test', title: 'Pack de test', source: 'test', generatedAt: '2026-11-16',
+    chapters: Array.from({ length: chapters }, (_, c) => ({
+      id: `c${c + 1}`, title: `Matière ${c + 1}`,
+      parts: [1, 2].map((p) => ({
+        id: `c${c + 1}p${p}`, title: `Partie ${p}`, pages: [1, 2] as [number, number], sections: [{ title: 'S', points: ['x'] }],
+        questions: Array.from({ length: perPart }, (_, i) => ({
+          id: `t-c${c + 1}p${p}-${i}`, q: `Question ${i} ?`, choices: ['bonne', 'fausse 1', 'fausse 2', 'fausse 3'], explain: 'Parce que.', page: 3, origin: 'livret' as const,
+        })),
+      })),
+    })),
+  });
+  const quiz = (acc: number, daysAgo: number): Result => {
+    const d = new Date(); d.setDate(d.getDate() - daysAgo);
+    return { date: d.toISOString(), source: 'app', exerciseId: 'bia:part:c1p1', exerciseName: 'x', category: 'bia', correct: Math.round(acc * 10), total: 10 };
+  };
+
+  it('valide un pack correct et rejette les packs mal formés', () => {
+    expect(validatePack(mk(1)).chapters).toHaveLength(1);
+    expect(() => validatePack({ format: 'autre' })).toThrow('pas un pack BIA');
+    const dup = mk(1); dup.chapters[0].parts[1].questions[0].id = dup.chapters[0].parts[0].questions[0].id;
+    expect(() => validatePack(dup)).toThrow('en double');
+    const bad = mk(1); bad.chapters[0].parts[0].questions[0].choices = ['a', 'a'];
+    expect(() => validatePack(bad)).toThrow('Propositions en double');
+  });
+  it('questionnaire de partie : 15 questions au plus, bonne réponse suivie après mélange, page citée', () => {
+    const def = biaExercise('bia:part:c1p1', mk(1, 30), {})!;
+    const items = def.generate(1, {});
+    expect(items).toHaveLength(15);
+    for (const it of items) {
+      expect(it.choices![Number(it.answer)].label).toBe('bonne');
+      expect(it.explain).toContain('Livret p. 3');
+      expect(it.qid!.startsWith('t-c1p1-')).toBe(true);
+    }
+    expect(biaExercise('bia:part:inconnu', mk(1), {})).toBeUndefined();
+    expect(biaExercise('bia:all', null, {})).toBeUndefined();
+  });
+  it('examen blanc : format officiel avec 5 matières, partiel sinon', () => {
+    const full = biaExercise('bia:exam', mk(5, 12), {})!;
+    expect(full.generate(1)).toHaveLength(100);
+    expect(full.timeLimitS).toBe(150 * 60);
+    expect(full.silent).toBe(true);
+    expect(full.name).toBe('BIA · Examen blanc');
+    const partial = biaExercise('bia:exam', mk(1, 12), {})!;
+    expect(partial.generate(1)).toHaveLength(20);
+    expect(partial.timeLimitS).toBe(30 * 60);
+    expect(partial.name).toContain('partiel');
+    // matière par matière, comme le sujet officiel
+    const tags = full.generate(1).map((i) => i.tag);
+    expect(tags.slice(0, 20).every((t) => t === tags[0])).toBe(true);
+  });
+  it('révision espacée : 1, 3, 7, 14, 30 jours, retour en boîte 1 à l’erreur', () => {
+    const now = new Date('2026-11-16T10:00:00');
+    let srs = {};
+    const days = (due: string) => Math.round((new Date(due).getTime() - new Date('2026-11-16').getTime()) / 86400000);
+    for (const expected of LEITNER_DAYS) {
+      srs = srsUpdate(srs, 'q', true, now);
+      expect(days((srs as Record<string, { due: string }>).q.due)).toBe(expected);
+    }
+    srs = srsUpdate(srs, 'q', true, now);
+    expect((srs as Record<string, { box: number }>).q.box).toBe(5);
+    srs = srsUpdate(srs, 'q', false, now);
+    expect((srs as Record<string, { box: number; due: string }>).q).toEqual({ box: 1, due: '2026-11-17' });
+    expect(dueIds(srs, now)).toEqual([]);
+    expect(dueIds(srs, new Date('2026-11-17T08:00:00'))).toEqual(['q']);
+  });
+  it('révisions du jour : seulement les questions arrivées à échéance', () => {
+    const pack = mk(1);
+    expect(biaExercise('bia:due', pack, {})).toBeUndefined();
+    const srs = { 't-c1p1-0': { box: 1, due: '2020-01-01' }, 't-c1p1-1': { box: 2, due: '2999-01-01' } };
+    expect(biaExercise('bia:due', pack, srs)!.generate(1).map((i) => i.qid)).toEqual(['t-c1p1-0']);
+  });
+  it('statut : lire la fiche ne suffit pas, la maîtrise exige des résultats réguliers', () => {
+    const part = mk(1).chapters[0].parts[0];
+    const seen = Object.fromEntries(part.questions.map((q) => [q.id, [1, 1] as [number, number]]));
+    expect(partStatus(part, false, {}, [])).toBe('none');
+    expect(partStatus(part, true, {}, [])).toBe('progress');
+    expect(partStatus(part, true, seen, [quiz(0.9, 0)])).toBe('reviewed');
+    expect(partStatus(part, true, seen, [quiz(0.9, 0), quiz(0.9, 0), quiz(0.9, 0)])).toBe('reviewed'); // même jour
+    expect(partStatus(part, true, seen, [quiz(0.9, 0), quiz(0.6, 1), quiz(0.9, 2)])).toBe('reviewed'); // irrégulier
+    expect(partStatus(part, true, seen, [quiz(0.9, 0), quiz(0.8, 1), quiz(1, 2)])).toBe('mastered');
+    expect(partStatus(part, false, seen, [quiz(0.9, 0), quiz(0.8, 1), quiz(1, 2)])).toBe('mastered');
+    expect(partStatus(part, true, {}, [quiz(0.9, 0), quiz(0.8, 1), quiz(1, 2)])).toBe('progress'); // questions non toutes vues
   });
 });

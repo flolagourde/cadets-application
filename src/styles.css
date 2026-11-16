@@ -147,3 +147,6 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; 
 .choices.three button { min-height: 0; padding: 6px; }
 .choices button.sel { border-color: var(--accent); background: #e8eef9; }
 .keys > span { display: block; }
+
+.tabbar a { font-size: 9.5px; letter-spacing: -.1px; }
+.tabbar a svg { width: 22px; height: 22px; }

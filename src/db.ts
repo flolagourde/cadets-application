@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 
 /** Domaines de compétence suivis par l'application. */
-export type CategoryId = 'calcul' | 'memoire' | 'attention' | 'logique' | 'spatial' | 'aero' | 'anglais';
+export type CategoryId = 'calcul' | 'memoire' | 'attention' | 'logique' | 'spatial' | 'aero' | 'anglais' | 'bia';
 
 export const CATEGORIES: Record<CategoryId, string> = {
   calcul: 'Calcul mental',
@@ -11,6 +11,7 @@ export const CATEGORIES: Record<CategoryId, string> = {
   spatial: 'Capacités spatiales',
   aero: 'Culture aéronautique',
   anglais: 'Anglais',
+  bia: 'BIA',
 };
 
 /** Provenance d'un résultat : jamais mélangées dans les statistiques. */
@@ -52,6 +53,8 @@ export interface Result {
   difficulty?: string;
   comment?: string;
   errors?: ErrorItem[];
+  /** Détail par matière (examens blancs BIA) : [bonnes réponses, questions]. */
+  breakdown?: Record<string, [number, number]>;
 }
 
 export interface LevelState {

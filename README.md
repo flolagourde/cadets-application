@@ -14,10 +14,14 @@ Toutes les données restent sur l'appareil (IndexedDB) : aucun compte, aucun ser
   Les résultats des plateformes ne sont jamais mélangés à ceux de l'app.
 - **Bibliothèque** : fiches datées et sourcées (Air France, institutions, sélection, repères techniques) avec quiz,
   vocabulaire aéronautique et compréhension écrite en anglais. Les questions ratées reviennent en priorité.
+- **BIA** : le cours et les questions ne sont pas dans ce dépôt. Ils arrivent par un « pack » privé (fichier JSON)
+  importé dans l'onglet BIA et stocké sur l'appareil. Fiches par partie avec renvoi aux pages du livret, questionnaires
+  par partie ou par matière, révisions espacées (1, 3, 7, 14, 30 jours), examen blanc au format officiel
+  (20 questions par matière, 90 secondes par question, aucune correction avant la fin), note sur 20 et détail par matière.
 - **Données** : tout reste sur l'appareil. Sauvegarde et restauration, chiffrement AES-256-GCM facultatif.
 - Installable et utilisable hors connexion.
 
-À venir : module BIA (fiches et QCM tirés du livret), calendrier, bilans hebdomadaires, page d'astuces.
+À venir : calendrier, bilans hebdomadaires, page d'astuces.
 
 Les fiches de `src/content/` portent une date de vérification (`asOf`) : les données de flotte, de dirigeants et de
 réseau sont à revérifier avant chaque sélection.
@@ -58,3 +62,10 @@ Un rappel s'affiche sur l'accueil au bout de 7 jours sans export. « Restaurer �
 
 Écrire un `ExerciseDef` (voir `src/exercises/types.ts`) et l'inscrire dans `src/exercises/registry.ts`.
 Le moteur (`src/pages/Run.tsx`) gère l'affichage, le chronométrage, la correction et l'enregistrement.
+
+## Pack BIA
+
+Un pack est un fichier JSON (`format: "cap-cadets-bia"`, `version: 1`) : matières → parties → sections de fiche,
+signalements et questions (4 choix, la bonne réponse en premier, explication, page du livret, origine `livret` ou `externe`).
+Importer une autre matière du même pack l'ajoute aux précédentes ; réimporter une matière la met à jour sans perdre
+les statistiques. Types et validation : `src/domain/bia.ts`. Ne jamais déposer un pack dans ce dépôt public.

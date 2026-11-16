@@ -18,6 +18,8 @@ export interface Choice {
 export interface Item {
   /** Identifiant de question (banques de quiz) : sert au suivi des questions ratées. */
   qid?: string;
+  /** Étiquette de regroupement pour le bilan (matière, en examen blanc). */
+  tag?: string;
   /** Texte de référence affiché au-dessus de la question (compréhension écrite). */
   passage?: string;
   prompt: string;
@@ -67,6 +69,8 @@ export interface ExerciseDef {
   noLevel?: boolean;
   /** Durée fixe en secondes : la séance s'arrête au bout du temps, quel que soit le nombre d'items traités. */
   timeLimitS?: number;
+  /** Mode examen : aucune correction pendant la séance, tout est dans le bilan. */
+  silent?: boolean;
   generate: (level: number, stats?: Record<string, [number, number]>) => Item[];
 }
 

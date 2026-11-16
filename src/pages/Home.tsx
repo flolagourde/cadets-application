@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { dayKey, db, DEFAULT_SETTINGS, type Settings, SOURCES } from '../db';
 import { DEFAULT_TEST_MINUTES, streak } from '../domain/adaptive';
+import { dueIds, loadPack, loadSrs } from '../domain/bia';
 import { type DayPlan, doneToday, getOrCreatePlan, nextInPlan } from '../domain/plan';
 import { EXERCISES } from '../exercises/registry';
 import { fmtMin } from '../ui';
@@ -18,6 +19,12 @@ export default function Home() {
   const results = useLiveQuery(() => db.results.toArray(), []);
   const settings = useLiveQuery(async () => ({ ...DEFAULT_SETTINGS, ...(((await db.kv.get('settings'))?.value as Partial<Settings>) ?? {}) }), []);
   const tests = useLiveQuery(() => db.extTests.toArray(), []);
+  const biaDue = useLiveQuery(async () => {
+    const pack = await loadPack();
+    if (!pack) return null;
+    const known = new Set(pack.chapters.flatMap((c) => c.parts.flatMap((p) => p.questions.map((q) => q.id))));
+    return dueIds(await loadSrs()).filter((id) => known.has(id)).length;
+  }, []);
   const [plan, setPlan] = useState<DayPlan | null>(null);
 
   useEffect(() => { void getOrCreatePlan().then(setPlan); }, []);
@@ -113,6 +120,16 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {biaDue ? (
+          <Link to="/run/bia:due" className="card row between" style={{ textDecoration: 'none', color: 'inherit' }}>
+            <span>
+              <span className="title" style={{ fontWeight: 650 }}>BIA : révisions du jour</span>
+              <span className="muted" style={{ display: 'block' }}>{biaDue} question{biaDue > 1 ? 's' : ''} à revoir aujourd’hui</span>
+            </span>
+            <span className="badge">{Math.min(20, biaDue)}</span>
+          </Link>
+        ) : null}
 
         {plan && (
           <button className="btn ghost sm" style={{ alignSelf: 'center' }} onClick={() => void getOrCreatePlan(plan.minutes, true).then(setPlan)}>

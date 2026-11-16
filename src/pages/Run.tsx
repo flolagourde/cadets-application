@@ -5,6 +5,7 @@ import { dayKey, db, type ErrorItem, type Result } from '../db';
 import { decideLevel, type LevelDecision, median } from '../domain/adaptive';
 import { doneToday, type DayPlan, nextInPlan } from '../domain/plan';
 import type { QStats } from '../content/quiz';
+import { biaExercise, loadPack, loadSrs, recordSrs } from '../domain/bia';
 import { getExercise } from '../exercises/registry';
 import type { ExerciseDef, Item } from '../exercises/types';
 import { Dial, FigureView, fmtSec, Keypad, MatrixCell } from '../ui';
@@ -60,6 +61,7 @@ function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; le
     if (stage !== 'answer' || finished.current) return;
     const entry: LogEntry = { item, given, ok: isCorrect(item, given), ms: Math.round(performance.now() - t0.current) };
     log.current.push(entry);
+    if (def.silent) return next(); // mode examen : pas de correction immédiate
     setLast(entry);
     setStage('feedback');
   };
@@ -118,7 +120,7 @@ function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; le
         {def.timeLimitS ? (
           <>
             <div className="progress"><i style={{ width: `${100 - (left / def.timeLimitS) * 100}%` }} /></div>
-            <span className="small">{left} s · {log.current.filter((l) => l.ok).length} ✓</span>
+            <span className="small">{left >= 100 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : `${left} s`}{def.silent ? ` · ${log.current.length}/${scoredTotal}` : ` · ${log.current.filter((l) => l.ok).length} ✓`}</span>
           </>
         ) : (
           <>
@@ -234,7 +236,10 @@ interface Summary { result: Result; decision: LevelDecision | null; previousLeve
 
 export default function Run() {
   const { id = '' } = useParams();
-  const def: ExerciseDef | undefined = getExercise(id);
+  const isBia = id.startsWith('bia:');
+  const bia = useLiveQuery(async () => (isBia ? { pack: await loadPack(), srs: await loadSrs() } : null), [id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const def: ExerciseDef | undefined = useMemo(() => (isBia ? (bia ? biaExercise(id, bia.pack, bia.srs) : undefined) : getExercise(id)), [id, bia]);
   const nav = useNavigate();
   const storedLevel = useLiveQuery(async () => (await db.levels.get(id))?.level ?? 1, [id]);
   const todayResults = useLiveQuery(() => db.results.where('source').equals('app').toArray(), []);
@@ -247,6 +252,7 @@ export default function Run() {
 
   useEffect(() => { setPhase('intro'); setSummary(null); }, [id]);
 
+  if (isBia && bia === undefined) return <div className="run" />;
   if (!def) {
     return <div className="page"><p>Exercice introuvable.</p><Link className="btn" to="/train">Retour</Link></div>;
   }
@@ -269,6 +275,15 @@ export default function Run() {
       expected: label(l.item, l.item.answer),
       explain: l.item.explain,
     }));
+    const tagged = log.filter((l) => l.item.tag);
+    let breakdown: Record<string, [number, number]> | undefined;
+    if (def.silent && tagged.length) {
+      breakdown = {};
+      for (const l of tagged) {
+        const [ok, n] = breakdown[l.item.tag!] ?? [0, 0];
+        breakdown[l.item.tag!] = [ok + (l.ok ? 1 : 0), n + 1];
+      }
+    }
     const result: Result = {
       date: new Date().toISOString(),
       source: 'app',
@@ -283,6 +298,7 @@ export default function Run() {
       medianMs: Math.round(median(log.filter((l) => l.given !== null).map((l) => l.ms))),
       durationS,
       errors,
+      breakdown,
     };
     await db.results.add(result);
     // suivi par question (quiz) : les questions ratées reviendront en priorité
@@ -295,6 +311,7 @@ export default function Run() {
       }
       await db.kv.put({ key: 'qstats', value: qs });
     }
+    if (isBia && asked.length) await recordSrs(asked.map((l) => ({ qid: l.item.qid!, ok: l.ok })));
     if (def.noLevel) {
       setSummary({ result, decision: null, previousLevel: level });
       setPhase('done');
@@ -335,11 +352,27 @@ export default function Run() {
         <div className="page">
           <div className="card" style={{ textAlign: 'center' }}>
             <div className="score">{summary.result.correct}/{summary.result.total}</div>
+            {def.silent && summary.result.total ? (
+              <p style={{ fontWeight: 650 }}>Note : {(((summary.result.correct ?? 0) / summary.result.total) * 20).toFixed(1).replace('.', ',')} / 20</p>
+            ) : null}
             {def.timeLimitS && <p className="muted">{summary.result.correct} bonnes réponses en {def.timeLimitS} secondes</p>}
             <p className="muted">
               Précision {summary.result.scorePct} % · temps médian {fmtSec(summary.result.medianMs ?? 0)}{summary.decision ? ` · niveau ${summary.previousLevel}` : ''}
             </p>
           </div>
+          {summary.result.breakdown && (
+            <div className="card">
+              <h2>Par matière</h2>
+              <div className="list">
+                {Object.entries(summary.result.breakdown).map(([name, [ok, n]]) => (
+                  <div className="item" key={name}>
+                    <span className="grow title">{name}</span>
+                    <span className={`badge ${ok / n >= 0.8 ? 'ok' : ok / n < 0.5 ? 'warn' : ''}`}>{ok}/{n}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {summary.decision ? (
             <div className="card stack">
               <div className="row between">
