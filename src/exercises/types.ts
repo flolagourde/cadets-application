@@ -9,6 +9,10 @@ export interface Choice {
 }
 
 export interface Item {
+  /** Identifiant de question (banques de quiz) : sert au suivi des questions ratées. */
+  qid?: string;
+  /** Texte de référence affiché au-dessus de la question (compréhension écrite). */
+  passage?: string;
   prompt: string;
   sub?: string;
   /** Affichage : grand caractère (stimulus), grille de symboles, paire à comparer, figure. */
@@ -42,7 +46,9 @@ export interface ExerciseDef {
   targetMs: (level: number) => number;
   /** Retours visuels courts (tâches de cadence). */
   fast?: boolean;
-  generate: (level: number) => Item[];
+  /** Quiz de connaissances : pas de niveau de difficulté, suivi par question. */
+  noLevel?: boolean;
+  generate: (level: number, stats?: Record<string, [number, number]>) => Item[];
 }
 
 export const MAX_LEVEL = 10;

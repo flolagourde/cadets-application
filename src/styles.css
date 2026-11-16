@@ -127,3 +127,14 @@ label.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; 
 .fig rect.on { fill: var(--deep); }
 .fig rect.off { fill: #eef1f6; }
 .score { font-size: 52px; font-weight: 750; font-variant-numeric: tabular-nums; }
+
+/* --- Quiz et bibliothèque --- */
+.stage.reading { justify-content: flex-start; overflow-y: auto; text-align: left; align-items: stretch; }
+.stage.reading .limit { max-width: none; }
+.passage { background: #fff; border-radius: 14px; padding: 14px; font-size: 16px; line-height: 1.55; max-height: 42dvh; overflow-y: auto; }
+.choices button { text-align: center; line-height: 1.3; }
+.fiche h3 { font-size: 15px; margin: 14px 0 6px; color: var(--deep); }
+.fiche ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.fiche li { font-size: 15px; line-height: 1.45; }
+.fiche a { color: var(--accent); word-break: break-word; }
+.tabbar a { font-size: 10px; }

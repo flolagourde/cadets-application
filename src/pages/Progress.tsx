@@ -46,7 +46,7 @@ function Synthese({ results }: { results: Result[] }) {
                   <div className="item" key={def.id} style={{ display: 'block' }}>
                     <div className="row between">
                       <span className="title">{def.name}</span>
-                      <span className="badge">Niv. {levelOf(levels, def.id)}</span>
+                      {!def.noLevel && <span className="badge">Niv. {levelOf(levels, def.id)}</span>}
                     </div>
                     <div className="row between" style={{ marginTop: 4 }}>
                       <span className="muted">

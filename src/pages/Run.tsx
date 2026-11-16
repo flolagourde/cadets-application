@@ -4,7 +4,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { dayKey, db, type ErrorItem, type Result } from '../db';
 import { decideLevel, type LevelDecision, median } from '../domain/adaptive';
 import { doneToday, type DayPlan, nextInPlan } from '../domain/plan';
-import { EXERCISES } from '../exercises/registry';
+import type { QStats } from '../content/quiz';
+import { getExercise } from '../exercises/registry';
 import type { ExerciseDef, Item } from '../exercises/types';
 import { FigureView, fmtSec, Keypad } from '../ui';
 
@@ -23,8 +24,9 @@ function label(item: Item, value: string | null): string {
   return value;
 }
 
-function Session({ def, level, onFinish, onQuit }: { def: ExerciseDef; level: number; onFinish: (log: LogEntry[], durationS: number) => void; onQuit: () => void }) {
-  const items = useMemo(() => def.generate(level), [def, level]);
+function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; level: number; stats: QStats; onFinish: (log: LogEntry[], durationS: number) => void; onQuit: () => void }) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const items = useMemo(() => def.generate(level, stats), [def, level]);
   const [idx, setIdx] = useState(0);
   const [stage, setStage] = useState<Stage>('gap');
   const [token, setToken] = useState<string | null>(null);
@@ -81,6 +83,9 @@ function Session({ def, level, onFinish, onQuit }: { def: ExerciseDef; level: nu
 
   const scoredTotal = items.filter((i) => i.kind !== 'none').length;
   const maxLen = item.kind === 'numeric' ? Math.max(item.answer.length + 2, 4) : 0;
+  // Propositions courtes ou figures : deux colonnes. Phrases : une colonne, plus lisible.
+  const twoCols = item.choices?.every((c) => c.figure || (c.label ?? '').length <= 16) ?? false;
+  const reading = (stage === 'answer' || stage === 'observe') && !!item.passage;
 
   return (
     <div className="run">
@@ -90,8 +95,9 @@ function Session({ def, level, onFinish, onQuit }: { def: ExerciseDef; level: nu
         <span className="small">{log.current.length}/{scoredTotal}</span>
       </div>
 
-      <div className="stage">
+      <div className={`stage ${reading ? 'reading' : ''}`}>
         {stage === 'gap' && <div style={{ height: 150 }} />}
+        {reading && <div className="passage">{item.passage}</div>}
 
         {stage === 'memorize' && (
           <>
@@ -109,7 +115,7 @@ function Session({ def, level, onFinish, onQuit }: { def: ExerciseDef; level: nu
               </>
             ) : (
               <>
-                <p className={`prompt ${item.grid || item.pair || item.figure || item.memorize ? 'q' : ''}`}>{item.prompt}</p>
+                <p className={`prompt ${item.grid || item.pair || item.figure || item.memorize || item.qid ? 'q' : ''}`}>{item.prompt}</p>
                 {item.sub && <p className="muted">{item.sub}</p>}
               </>
             )}
@@ -151,7 +157,7 @@ function Session({ def, level, onFinish, onQuit }: { def: ExerciseDef; level: nu
           />
         )}
         {stage === 'answer' && item.kind === 'choice' && item.choices && (
-          <div className="choices two">
+          <div className={`choices ${twoCols ? 'two' : ''}`}>
             {item.choices.map((c, i) => (
               <button key={i} onClick={() => submit(String(i))}>
                 {c.figure ? <FigureView figure={c.figure} size={96} /> : c.label}
@@ -164,11 +170,11 @@ function Session({ def, level, onFinish, onQuit }: { def: ExerciseDef; level: nu
   );
 }
 
-interface Summary { result: Result; decision: LevelDecision; previousLevel: number }
+interface Summary { result: Result; decision: LevelDecision | null; previousLevel: number }
 
 export default function Run() {
   const { id = '' } = useParams();
-  const def: ExerciseDef | undefined = EXERCISES[id];
+  const def: ExerciseDef | undefined = getExercise(id);
   const nav = useNavigate();
   const storedLevel = useLiveQuery(async () => (await db.levels.get(id))?.level ?? 1, [id]);
   const todayResults = useLiveQuery(() => db.results.where('source').equals('app').toArray(), []);
@@ -177,6 +183,7 @@ export default function Run() {
   const [level, setLevel] = useState(1);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [runKey, setRunKey] = useState(0);
+  const [stats, setStats] = useState<QStats>({});
 
   useEffect(() => { setPhase('intro'); setSummary(null); }, [id]);
 
@@ -184,7 +191,8 @@ export default function Run() {
     return <div className="page"><p>Exercice introuvable.</p><Link className="btn" to="/train">Retour</Link></div>;
   }
 
-  const start = () => {
+  const start = async () => {
+    setStats(((await db.kv.get('qstats'))?.value as QStats | undefined) ?? {});
     setLevel(storedLevel ?? 1);
     setRunKey((k) => k + 1);
     setPhase('run');
@@ -204,7 +212,7 @@ export default function Run() {
       exerciseId: def.id,
       exerciseName: def.name,
       category: def.category,
-      level,
+      level: def.noLevel ? undefined : level,
       correct,
       wrong: log.length - correct,
       total: log.length,
@@ -214,6 +222,21 @@ export default function Run() {
       errors,
     };
     await db.results.add(result);
+    // suivi par question (quiz) : les questions ratées reviendront en priorité
+    const asked = log.filter((l) => l.item.qid);
+    if (asked.length) {
+      const qs = ((await db.kv.get('qstats'))?.value as QStats | undefined) ?? {};
+      for (const l of asked) {
+        const [seen, ok] = qs[l.item.qid!] ?? [0, 0];
+        qs[l.item.qid!] = [seen + 1, ok + (l.ok ? 1 : 0)];
+      }
+      await db.kv.put({ key: 'qstats', value: qs });
+    }
+    if (def.noLevel) {
+      setSummary({ result, decision: null, previousLevel: level });
+      setPhase('done');
+      return;
+    }
     const history = (await db.results.where('exerciseId').equals(def.id).toArray())
       .filter((r) => r.source === 'app')
       .sort((a, b) => b.date.localeCompare(a.date));
@@ -224,7 +247,7 @@ export default function Run() {
   };
 
   if (phase === 'run') {
-    return <Session key={runKey} def={def} level={level} onFinish={finish} onQuit={() => setPhase('intro')} />;
+    return <Session key={runKey} def={def} level={level} stats={stats} onFinish={finish} onQuit={() => setPhase('intro')} />;
   }
 
   const nextId = nextInPlan(plan, doneToday(todayResults ?? []));
@@ -238,11 +261,11 @@ export default function Run() {
       {phase === 'intro' && (
         <div className="page">
           <div className="card stack">
-            <div className="row between"><h2 style={{ margin: 0 }}>Règles</h2><span className="badge">Niveau {storedLevel ?? '…'}</span></div>
+            <div className="row between"><h2 style={{ margin: 0 }}>Règles</h2>{!def.noLevel && <span className="badge">Niveau {storedLevel ?? '…'}</span>}</div>
             <p>{def.rules}</p>
             <p className="muted">Durée estimée : environ {def.estMinutes} min. Quitter en cours de route n’enregistre rien.</p>
           </div>
-          <button className="btn block" onClick={start} disabled={storedLevel === undefined}>Commencer</button>
+          <button className="btn block" onClick={() => void start()} disabled={storedLevel === undefined}>Commencer</button>
         </div>
       )}
       {phase === 'done' && summary && (
@@ -250,18 +273,22 @@ export default function Run() {
           <div className="card" style={{ textAlign: 'center' }}>
             <div className="score">{summary.result.correct}/{summary.result.total}</div>
             <p className="muted">
-              Précision {summary.result.scorePct} % · temps médian {fmtSec(summary.result.medianMs ?? 0)} · niveau {summary.previousLevel}
+              Précision {summary.result.scorePct} % · temps médian {fmtSec(summary.result.medianMs ?? 0)}{summary.decision ? ` · niveau ${summary.previousLevel}` : ''}
             </p>
           </div>
-          <div className="card stack">
-            <div className="row between">
-              <h2 style={{ margin: 0 }}>Adaptation</h2>
-              <span className={`badge ${summary.decision.level > summary.previousLevel ? 'ok' : summary.decision.level < summary.previousLevel ? 'warn' : ''}`}>
-                Prochain niveau : {summary.decision.level}
-              </span>
+          {summary.decision ? (
+            <div className="card stack">
+              <div className="row between">
+                <h2 style={{ margin: 0 }}>Adaptation</h2>
+                <span className={`badge ${summary.decision!.level > summary.previousLevel ? 'ok' : summary.decision!.level < summary.previousLevel ? 'warn' : ''}`}>
+                  Prochain niveau : {summary.decision!.level}
+                </span>
+              </div>
+              <p>{summary.decision!.reason}</p>
             </div>
-            <p>{summary.decision.reason}</p>
-          </div>
+          ) : (
+            <div className="card"><p className="muted">Les questions ratées ou jamais vues reviendront en priorité au prochain quiz.</p></div>
+          )}
           {summary.result.errors && summary.result.errors.length > 0 && (
             <div className="card">
               <h2>Erreurs à revoir ({summary.result.errors.length})</h2>
@@ -277,10 +304,10 @@ export default function Run() {
             </div>
           )}
           {nextId && nextId !== def.id && (
-            <Link className="btn block" to={`/run/${nextId}`} replace>Exercice suivant : {EXERCISES[nextId]?.name}</Link>
+            <Link className="btn block" to={`/run/${nextId}`} replace>Exercice suivant : {getExercise(nextId)?.name}</Link>
           )}
           <div className="grid2">
-            <button className="btn ghost" onClick={start}>Recommencer</button>
+            <button className="btn ghost" onClick={() => void start()}>Recommencer</button>
             <Link className="btn ghost" to="/">Terminer</Link>
           </div>
         </div>

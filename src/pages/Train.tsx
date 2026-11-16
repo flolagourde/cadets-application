@@ -31,7 +31,7 @@ export default function Train() {
                         {st.sessions === 0 ? 'Jamais travaillé' : `${st.sessions} séance${st.sessions > 1 ? 's' : ''} · précision récente ${pct(st.recentAcc ?? 0)}`}
                       </span>
                     </span>
-                    <span className="badge">Niv. {levelOf(levels, def.id)}</span>
+                    {!def.noLevel && <span className="badge">Niv. {levelOf(levels, def.id)}</span>}
                   </Link>
                 );
               })}

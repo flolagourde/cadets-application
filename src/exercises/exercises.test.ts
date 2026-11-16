@@ -6,7 +6,10 @@ import { SEED } from '../domain/catalog';
 import { alter } from './attention';
 import { isChiral, SHAPES } from './logic';
 import { nbackStream } from './memory';
-import { EXERCISE_LIST, EXERCISES } from './registry';
+import { PASSAGES, VOCAB } from '../content/english';
+import { FICHES } from '../content/fiches';
+import { pickQuestions } from '../content/quiz';
+import { EXERCISE_LIST, EXERCISES, getExercise } from './registry';
 
 const figKey = (f: boolean[][]) => f.map((r) => r.map((c) => (c ? 1 : 0)).join('')).join('/');
 
@@ -167,5 +170,56 @@ describe('coach plateformes', () => {
   it('les domaines renforcés remontent dans la séance du téléphone', () => {
     const all = EXERCISE_LIST.map((e) => res({ exerciseId: e.id, category: e.category, correct: 9 }));
     expect(EXERCISES[composeSession(2, all, new Date(), ['spatial'])[0].exerciseId].category).toBe('spatial');
+  });
+});
+
+describe('bibliothèque et quiz', () => {
+  const all = [...FICHES.flatMap((f) => f.questions), ...PASSAGES.flatMap((p) => p.questions)];
+  it('identifiants de questions et de fiches uniques', () => {
+    expect(new Set(all.map((q) => q.id)).size).toBe(all.length);
+    expect(new Set(FICHES.map((f) => f.id)).size).toBe(FICHES.length);
+  });
+  it('chaque question a 4 propositions distinctes et une explication', () => {
+    for (const q of all) {
+      expect(q.choices).toHaveLength(4);
+      expect(new Set(q.choices).size).toBe(4);
+      expect(q.explain.length).toBeGreaterThan(10);
+    }
+  });
+  it('chaque fiche est datée, sourcée, et ses données changeantes sont signalées', () => {
+    for (const f of FICHES) {
+      expect(f.asOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(f.sources.length).toBeGreaterThan(0);
+      expect(f.questions.length).toBeGreaterThan(3);
+    }
+    expect(FICHES.find((f) => f.id === 'af-groupe')!.questions.filter((q) => q.volatile).length).toBeGreaterThanOrEqual(3);
+  });
+  it('vocabulaire sans doublon', () => {
+    expect(new Set(VOCAB.map((v) => v[0])).size).toBe(VOCAB.length);
+    expect(new Set(VOCAB.map((v) => v[1])).size).toBe(VOCAB.length);
+  });
+  it('le tirage privilégie les questions jamais vues puis les plus ratées', () => {
+    const bank = Array.from({ length: 20 }, (_, i) => ({ id: `q${i}` }));
+    const stats: Record<string, [number, number]> = {};
+    for (let i = 0; i < 20; i++) if (i !== 3 && i !== 7) stats[`q${i}`] = [4, i === 5 ? 0 : 4];
+    for (let rep = 0; rep < 50; rep++) {
+      const ids = pickQuestions(bank, stats, 8).map((q) => q.id);
+      expect(ids).toContain('q3'); expect(ids).toContain('q7'); expect(ids).toContain('q5');
+      expect(new Set(ids).size).toBe(8);
+    }
+  });
+  it('la bonne réponse suit le mélange des propositions', () => {
+    const def = getExercise('fiche:af-groupe')!;
+    for (let rep = 0; rep < 20; rep++) {
+      for (const it of def.generate(1)) {
+        const q = FICHES[0].questions.find((x) => x.id === it.qid)!;
+        expect(it.choices![Number(it.answer)].label).toBe(q.choices[0]);
+      }
+    }
+  });
+  it('compréhension écrite : un seul texte par séance, questions limitées en temps', () => {
+    const items = EXERCISES['en-reading'].generate(1);
+    expect(new Set(items.map((i) => i.passage)).size).toBe(1);
+    expect(items.every((i) => i.limitMs === 45000)).toBe(true);
   });
 });
