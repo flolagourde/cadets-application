@@ -1,8 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { dayKey, db, DEFAULT_SETTINGS, type Settings } from '../db';
-import { streak } from '../domain/adaptive';
+import { dayKey, db, DEFAULT_SETTINGS, type Settings, SOURCES } from '../db';
+import { DEFAULT_TEST_MINUTES, streak } from '../domain/adaptive';
 import { type DayPlan, doneToday, getOrCreatePlan, nextInPlan } from '../domain/plan';
 import { EXERCISES } from '../exercises/registry';
 import { fmtMin } from '../ui';
@@ -17,6 +17,7 @@ function daysUntil(iso?: string): number | null {
 export default function Home() {
   const results = useLiveQuery(() => db.results.toArray(), []);
   const settings = useLiveQuery(async () => ({ ...DEFAULT_SETTINGS, ...(((await db.kv.get('settings'))?.value as Partial<Settings>) ?? {}) }), []);
+  const tests = useLiveQuery(() => db.extTests.toArray(), []);
   const [plan, setPlan] = useState<DayPlan | null>(null);
 
   useEffect(() => { void getOrCreatePlan().then(setPlan); }, []);
@@ -81,11 +82,43 @@ export default function Home() {
             })}
           </div>
           {nextId ? (
-            <Link className="btn block" to={`/run/${nextId}`}>{done.size ? 'Continuer la séance' : 'Démarrer la séance'}</Link>
+            <Link className="btn block" to={`/run/${nextId}`}>{plan?.items.some((i) => done.has(i.exerciseId)) ? 'Continuer la séance' : 'Démarrer la séance'}</Link>
           ) : plan ? (
             <p className="badge ok" style={{ alignSelf: 'flex-start' }}>Séance du jour terminée</p>
           ) : null}
         </div>
+
+        {plan?.external && plan.external.length > 0 && (
+          <div className="card stack">
+            <div className="row between">
+              <h2 style={{ margin: 0 }}>Sur plateforme (ordinateur)</h2>
+              <span className="badge">{plan.external.filter((e) => done.has(e.testId)).length}/{plan.external.length}</span>
+            </div>
+            <p className="muted">Tests choisis d’après tes stanines saisies. Touche un test pour enregistrer ton résultat.</p>
+            <div className="list">
+              {plan.external.map((e) => {
+                const t = tests?.find((x) => x.id === e.testId);
+                if (!t) return null;
+                return (
+                  <Link className="item" key={e.testId} to={`/progress?test=${encodeURIComponent(e.testId)}`}>
+                    <span className={`check ${done.has(e.testId) ? 'done' : ''}`}>{done.has(e.testId) ? '✓' : ''}</span>
+                    <span className="grow">
+                      <span className="title">{t.name}</span>
+                      <span className="muted" style={{ display: 'block' }}>{SOURCES[t.source]} · {e.reason}</span>
+                    </span>
+                    <span className="muted small">{t.minutes ?? `~${DEFAULT_TEST_MINUTES}`} min</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {plan && (
+          <button className="btn ghost sm" style={{ alignSelf: 'center' }} onClick={() => void getOrCreatePlan(plan.minutes, true).then(setPlan)}>
+            Recalculer le plan du jour
+          </button>
+        )}
 
         <div className="grid3">
           <div className="kpi"><b>{streak(all)}</b><span>jours d’affilée</span></div>

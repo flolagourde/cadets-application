@@ -1,11 +1,13 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CATEGORIES, type CategoryId, db, type Result, type Source, SOURCES } from '../db';
 import { accuracy, exerciseStats, levelOf } from '../domain/adaptive';
 import { byCategory } from '../exercises/registry';
 import { fmtDate, fmtMin, fmtSec, pct, Sparkline } from '../ui';
+import { Catalogue, Priorites, Saisie } from './External';
 
-type TabId = 'synthese' | 'historique' | 'saisie';
+type TabId = 'synthese' | 'historique' | 'saisie' | 'tests';
 
 function Synthese({ results }: { results: Result[] }) {
   const levels = useLiveQuery(() => db.levels.toArray(), []);
@@ -186,76 +188,12 @@ function Historique({ results }: { results: Result[] }) {
   );
 }
 
-const num = (v: string): number | undefined => (v.trim() === '' || Number.isNaN(Number(v.replace(',', '.'))) ? undefined : Number(v.replace(',', '.')));
-
-function Saisie({ onSaved }: { onSaved: () => void }) {
-  const names = useLiveQuery(async () => [...new Set((await db.results.toArray()).filter((r) => r.source !== 'app').map((r) => r.exerciseName))], []);
-  const today = new Date().toLocaleDateString('sv');
-  const [f, setF] = useState({
-    source: 'pilotest' as Source, name: '', date: today, category: 'autre' as CategoryId | 'autre',
-    correct: '', wrong: '', score: '', minutes: '', percentile: '', stanine: '', difficulty: '', comment: '',
-  });
-  const [error, setError] = useState('');
-  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
-
-  const save = async () => {
-    const stanine = num(f.stanine), percentile = num(f.percentile), score = num(f.score);
-    if (!f.name.trim()) return setError('Indiquez le nom de l’exercice.');
-    if (stanine !== undefined && (stanine < 1 || stanine > 9 || !Number.isInteger(stanine))) return setError('La classe Stanine est un entier de 1 à 9.');
-    if (percentile !== undefined && (percentile < 0 || percentile > 100)) return setError('Le percentile est compris entre 0 et 100.');
-    if (score !== undefined && (score < 0 || score > 100)) return setError('Le score est un pourcentage entre 0 et 100.');
-    const correct = num(f.correct), wrong = num(f.wrong), minutes = num(f.minutes);
-    const now = new Date();
-    const date = new Date(`${f.date}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:00`);
-    await db.results.add({
-      date: date.toISOString(), source: f.source, exerciseId: `${f.source}:${f.name.trim().toLowerCase()}`,
-      exerciseName: f.name.trim(), category: f.category,
-      correct, wrong, total: correct !== undefined && wrong !== undefined ? correct + wrong : undefined,
-      scorePct: score, durationS: minutes !== undefined ? Math.round(minutes * 60) : undefined,
-      percentile, stanine, difficulty: f.difficulty.trim() || undefined, comment: f.comment.trim() || undefined,
-    });
-    onSaved();
-  };
-
-  return (
-    <div className="card stack">
-      <h2>Résultat Pilotest / EPL Test</h2>
-      <p className="muted">Seuls la plateforme et le nom sont obligatoires : renseignez ce que l’épreuve fournit.</p>
-      <div className="seg">
-        {(['pilotest', 'epltest'] as Source[]).map((s) => (
-          <button key={s} className={f.source === s ? 'on' : ''} onClick={() => setF({ ...f, source: s })}>{SOURCES[s]}</button>
-        ))}
-      </div>
-      <label className="field">Nom de l’exercice
-        <input list="ext-names" value={f.name} onChange={set('name')} placeholder="Tel qu’affiché sur la plateforme" />
-        <datalist id="ext-names">{names?.map((n) => <option key={n} value={n} />)}</datalist>
-      </label>
-      <div className="grid2">
-        <label className="field">Date<input type="date" value={f.date} max={today} onChange={set('date')} /></label>
-        <label className="field">Domaine
-          <select value={f.category} onChange={set('category')}>
-            <option value="autre">Autre / mixte</option>
-            {(Object.keys(CATEGORIES) as CategoryId[]).map((c) => <option key={c} value={c}>{CATEGORIES[c]}</option>)}
-          </select>
-        </label>
-        <label className="field">Bonnes réponses<input inputMode="numeric" value={f.correct} onChange={set('correct')} /></label>
-        <label className="field">Mauvaises réponses<input inputMode="numeric" value={f.wrong} onChange={set('wrong')} /></label>
-        <label className="field">Score (%)<input inputMode="decimal" value={f.score} onChange={set('score')} /></label>
-        <label className="field">Temps (min)<input inputMode="decimal" value={f.minutes} onChange={set('minutes')} /></label>
-        <label className="field">Percentile<input inputMode="decimal" value={f.percentile} onChange={set('percentile')} /></label>
-        <label className="field">Stanine (1-9)<input inputMode="numeric" value={f.stanine} onChange={set('stanine')} /></label>
-      </div>
-      <label className="field">Difficulté<input value={f.difficulty} onChange={set('difficulty')} placeholder="Ex. : niveau 3, mode examen" /></label>
-      <label className="field">Commentaire<textarea rows={2} value={f.comment} onChange={set('comment')} /></label>
-      {error && <p className="error">{error}</p>}
-      <button className="btn block" onClick={() => void save()}>Enregistrer</button>
-    </div>
-  );
-}
-
 export default function Progress() {
-  const [tab, setTab] = useState<TabId>('synthese');
+  const [params, setParams] = useSearchParams();
+  const preset = params.get('test') ?? undefined;
+  const [tab, setTab] = useState<TabId>(preset ? 'saisie' : 'synthese');
   const results = useLiveQuery(async () => (await db.results.toArray()).sort((a, b) => b.date.localeCompare(a.date)), []);
+  const go = (t: TabId) => { setTab(t); if (preset) setParams({}, { replace: true }); };
 
   return (
     <div className="app">
@@ -265,13 +203,15 @@ export default function Progress() {
       </header>
       <main className="page">
         <div className="seg">
-          <button className={tab === 'synthese' ? 'on' : ''} onClick={() => setTab('synthese')}>Synthèse</button>
-          <button className={tab === 'historique' ? 'on' : ''} onClick={() => setTab('historique')}>Historique</button>
-          <button className={tab === 'saisie' ? 'on' : ''} onClick={() => setTab('saisie')}>Saisie externe</button>
+          <button className={tab === 'synthese' ? 'on' : ''} onClick={() => go('synthese')}>Synthèse</button>
+          <button className={tab === 'historique' ? 'on' : ''} onClick={() => go('historique')}>Historique</button>
+          <button className={tab === 'saisie' ? 'on' : ''} onClick={() => go('saisie')}>Saisie</button>
+          <button className={tab === 'tests' ? 'on' : ''} onClick={() => go('tests')}>Tests</button>
         </div>
-        {tab === 'synthese' && <Synthese results={results ?? []} />}
+        {tab === 'synthese' && <><Priorites results={results ?? []} /><Synthese results={results ?? []} /></>}
         {tab === 'historique' && <Historique results={results ?? []} />}
-        {tab === 'saisie' && <Saisie onSaved={() => setTab('historique')} />}
+        {tab === 'saisie' && <Saisie key={preset ?? 'libre'} preset={preset} onSaved={() => go('historique')} />}
+        {tab === 'tests' && <Catalogue results={results ?? []} />}
       </main>
     </div>
   );

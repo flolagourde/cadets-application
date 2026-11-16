@@ -1,4 +1,4 @@
-import { dayKey, type LevelState, type Result } from '../db';
+import { type CategoryId, dayKey, type ExtTest, type LevelState, type Result } from '../db';
 import { EXERCISE_LIST } from '../exercises/registry';
 import { type ExerciseDef, MAX_LEVEL } from '../exercises/types';
 
@@ -72,8 +72,9 @@ export interface PlanItem { exerciseId: string; reason: string }
  * Score de priorité = 0,55 × besoin (1 − précision récente) + 0,45 × ancienneté (jours sans pratique, plafonnée à 7),
  * puis pénalité de diversité (× 0,6 par exercice déjà retenu dans la même catégorie).
  * Un exercice jamais pratiqué reçoit besoin = 0,6 et ancienneté = 1 (séance de calibrage).
+ * Les domaines « renforcés » dans les réglages voient leur priorité multipliée par 1,3.
  */
-export function composeSession(minutes: number, appResults: Result[], now = new Date()): PlanItem[] {
+export function composeSession(minutes: number, appResults: Result[], now = new Date(), focus: CategoryId[] = []): PlanItem[] {
   const byEx = new Map<string, Result[]>();
   for (const r of [...appResults].sort((x, y) => y.date.localeCompare(x.date))) {
     if (!byEx.has(r.exerciseId)) byEx.set(r.exerciseId, []);
@@ -88,7 +89,9 @@ export function composeSession(minutes: number, appResults: Result[], now = new 
     else if (0.55 * need >= 0.45 * stale)
       reason = `Précision récente ${Math.round(st.recentAcc * 100)} % : à renforcer.`;
     else reason = `Pas travaillé depuis ${st.daysSince} jour${(st.daysSince ?? 0) > 1 ? 's' : ''} : entretien.`;
-    return { def, score: 0.55 * need + 0.45 * stale, reason };
+    const boost = focus.includes(def.category) ? 1.3 : 1;
+    if (boost > 1 && st.recentAcc !== null) reason += ' Domaine renforcé.';
+    return { def, score: (0.55 * need + 0.45 * stale) * boost, reason };
   });
   const plan: PlanItem[] = [];
   const perCat = new Map<string, number>();
@@ -127,3 +130,70 @@ export const median = (xs: number[]) => {
   const m = Math.floor(s.length / 2);
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
+
+// --- Travail sur plateforme (Pilotest, EPL Test) ---------------------------------
+
+export interface ExtStats { attempts: number; recent: number | null; best: number | null; daysSince: number | null }
+
+/** `history` : résultats de CE test, du plus récent au plus ancien. Stanine récente = moyenne des 3 dernières saisies. */
+export function extStats(history: Result[], now = new Date()): ExtStats {
+  const st = history.filter((r) => r.stanine !== undefined).map((r) => r.stanine!);
+  const last3 = st.slice(0, 3);
+  const daysSince = history.length
+    ? Math.floor((new Date(dayKey(now)).getTime() - new Date(dayKey(history[0].date)).getTime()) / 86400000)
+    : null;
+  return {
+    attempts: history.length,
+    recent: last3.length ? Math.round((last3.reduce((a, b) => a + b, 0) / last3.length) * 10) / 10 : null,
+    best: st.length ? Math.max(...st) : null,
+    daysSince,
+  };
+}
+
+export interface ExtPriority { test: ExtTest; stats: ExtStats; score: number; reason: string }
+
+/**
+ * Priorité d'un test de plateforme = 0,5 × écart + 0,3 × ancienneté + 0,2 si marqué « point faible ».
+ *  - écart = (objectif − stanine récente) / 4, borné entre 0 et 1 ; 0,5 si aucune stanine n'a été saisie ;
+ *  - ancienneté = jours sans pratique, plafonnés à 14, divisés par 14 ; 1 si jamais passé.
+ */
+export function extPriority(test: ExtTest, history: Result[], now = new Date()): ExtPriority {
+  const stats = extStats(history, now);
+  const gap = stats.recent === null ? 0.5 : Math.max(0, Math.min(1, (test.target - stats.recent) / 4));
+  const stale = stats.daysSince === null ? 1 : Math.min(stats.daysSince, 14) / 14;
+  const fmt = (n: number) => String(n).replace('.', ',');
+  let reason: string;
+  if (stats.attempts === 0) reason = 'Jamais saisi : à passer pour situer ton niveau.';
+  else if (stats.recent === null) reason = 'Aucune stanine saisie pour ce test : note-la au prochain passage.';
+  else if (gap > 0 && 0.5 * gap >= 0.3 * stale) reason = `Stanine récente ${fmt(stats.recent)} pour un objectif de ${test.target}.`;
+  else if (gap === 0 && stale < 0.5) reason = `Objectif atteint (stanine récente ${fmt(stats.recent)}) : entretien.`;
+  else reason = `Pas travaillé depuis ${stats.daysSince} jour${(stats.daysSince ?? 0) > 1 ? 's' : ''} (stanine récente ${fmt(stats.recent)}).`;
+  if (test.weak) reason += ' Point faible.';
+  return { test, stats, score: 0.5 * gap + 0.3 * stale + (test.weak ? 0.2 : 0), reason };
+}
+
+export function rankExternal(tests: ExtTest[], extResults: Result[], now = new Date()): ExtPriority[] {
+  const sorted = [...extResults].sort((a, b) => b.date.localeCompare(a.date));
+  return tests
+    .filter((t) => t.active)
+    .map((t) => extPriority(t, sorted.filter((r) => r.exerciseId === t.id), now))
+    // à priorité égale : les tests PSY1 d'abord (étape la plus sélective), puis ordre alphabétique
+    .sort((a, b) => b.score - a.score || Number(b.test.stage === 'psy1') - Number(a.test.stage === 'psy1') || a.test.name.localeCompare(b.test.name));
+}
+
+export interface PlanExt { testId: string; reason: string }
+export const DEFAULT_TEST_MINUTES = 10;
+
+/** Remplit le budget de minutes avec les tests les plus prioritaires (au moins un test). */
+export function composeExternal(minutes: number, tests: ExtTest[], extResults: Result[], now = new Date()): PlanExt[] {
+  const out: PlanExt[] = [];
+  let budget = minutes;
+  for (const p of rankExternal(tests, extResults, now)) {
+    if (budget <= 0) break;
+    const cost = p.test.minutes ?? DEFAULT_TEST_MINUTES;
+    if (cost > budget && out.length) continue;
+    out.push({ testId: p.test.id, reason: p.reason });
+    budget -= cost;
+  }
+  return out;
+}

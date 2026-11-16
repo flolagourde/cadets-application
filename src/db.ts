@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 
 /** Domaines de compétence suivis par l'application. */
-export type CategoryId = 'calcul' | 'memoire' | 'attention' | 'logique' | 'spatial';
+export type CategoryId = 'calcul' | 'memoire' | 'attention' | 'logique' | 'spatial' | 'aero' | 'anglais';
 
 export const CATEGORIES: Record<CategoryId, string> = {
   calcul: 'Calcul mental',
@@ -9,6 +9,8 @@ export const CATEGORIES: Record<CategoryId, string> = {
   attention: 'Attention',
   logique: 'Raisonnement logique',
   spatial: 'Capacités spatiales',
+  aero: 'Culture aéronautique',
+  anglais: 'Anglais',
 };
 
 /** Provenance d'un résultat : jamais mélangées dans les statistiques. */
@@ -59,6 +61,27 @@ export interface LevelState {
   reason?: string;
 }
 
+export type Stage = 'psy0' | 'psy1' | 'autre';
+
+export const STAGES: Record<Stage, string> = { psy1: 'PSY1', psy0: 'PSY0', autre: 'Mes tests' };
+
+/** Test d'une plateforme externe (catalogue modifiable par l'utilisateur). */
+export interface ExtTest {
+  id: string;
+  source: Exclude<Source, 'app'>;
+  name: string;
+  stage: Stage;
+  /** Aptitudes telles que la plateforme les classe. */
+  aptitudes: string[];
+  /** Durée du test en minutes, quand elle est connue. */
+  minutes?: number;
+  /** Objectif personnel de stanine (1 à 9) : ce n'est pas un seuil officiel. */
+  target: number;
+  weak: boolean;
+  active: boolean;
+  custom?: boolean;
+}
+
 export interface KV {
   key: string;
   value: unknown;
@@ -71,15 +94,24 @@ export interface Settings {
   daysPerWeek: number;
   minutesPerDay: number;
   restDays: number[]; // 0 = dimanche
+  /** Minutes de travail sur plateforme prescrites les jours avec ordinateur (0 = désactivé). */
+  externalMinutes: number;
+  computerDays: number[];
+  /** Domaines de l'app à renforcer (priorité × 1,3). */
+  focusCategories: CategoryId[];
   lastBackupAt?: string;
 }
 
-export const DEFAULT_SETTINGS: Settings = { daysPerWeek: 6, minutesPerDay: 20, restDays: [0] };
+export const DEFAULT_SETTINGS: Settings = {
+  daysPerWeek: 6, minutesPerDay: 20, restDays: [0],
+  externalMinutes: 30, computerDays: [0, 1, 2, 3, 4, 5, 6], focusCategories: [],
+};
 
 class CapDB extends Dexie {
   results!: Table<Result, number>;
   levels!: Table<LevelState, string>;
   kv!: Table<KV, string>;
+  extTests!: Table<ExtTest, string>;
 
   constructor() {
     super('cap-cadets');
@@ -88,6 +120,7 @@ class CapDB extends Dexie {
       levels: 'exerciseId',
       kv: 'key',
     });
+    this.version(2).stores({ extTests: 'id, source, stage' });
   }
 }
 

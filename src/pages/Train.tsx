@@ -17,7 +17,7 @@ export default function Train() {
         <p>Exercice libre : le niveau s’ajuste à vos résultats</p>
       </header>
       <main className="page">
-        {(Object.keys(CATEGORIES) as CategoryId[]).map((cat) => (
+        {(Object.keys(CATEGORIES) as CategoryId[]).filter((cat) => byCategory(cat).length > 0).map((cat) => (
           <div className="card" key={cat}>
             <h2>{CATEGORIES[cat]}</h2>
             <div className="list">

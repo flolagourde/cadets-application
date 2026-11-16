@@ -25,11 +25,12 @@ async function deriveKey(password: string, salt: Uint8Array<ArrayBuffer>) {
 export async function exportData(password?: string): Promise<string> {
   const payload = JSON.stringify({
     app: APP,
-    schema: 1,
+    schema: 2,
     exportedAt: new Date().toISOString(),
     results: await db.results.toArray(),
     levels: await db.levels.toArray(),
     kv: await db.kv.toArray(),
+    extTests: await db.extTests.toArray(),
   });
   if (!password) return payload;
   const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -56,11 +57,13 @@ export async function importData(text: string, password?: string): Promise<numbe
   if (!Array.isArray(obj.results) || !Array.isArray(obj.levels) || !Array.isArray(obj.kv)) {
     throw new Error('Sauvegarde incomplète.');
   }
-  await db.transaction('rw', db.results, db.levels, db.kv, async () => {
-    await Promise.all([db.results.clear(), db.levels.clear(), db.kv.clear()]);
+  await db.transaction('rw', db.results, db.levels, db.kv, db.extTests, async () => {
+    await Promise.all([db.results.clear(), db.levels.clear(), db.kv.clear(), db.extTests.clear()]);
     await db.results.bulkAdd(obj.results);
     await db.levels.bulkAdd(obj.levels);
     await db.kv.bulkAdd(obj.kv);
+    // Sauvegardes d'avant le catalogue (schéma 1) : le catalogue par défaut sera recréé à l'ouverture.
+    if (Array.isArray(obj.extTests)) await db.extTests.bulkAdd(obj.extTests);
   });
   return obj.results.length;
 }

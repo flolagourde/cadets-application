@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Result } from '../db';
-import { composeSession, decideLevel, streak } from '../domain/adaptive';
+import type { ExtTest } from '../db';
+import { composeExternal, composeSession, decideLevel, extPriority, rankExternal, streak } from '../domain/adaptive';
+import { SEED } from '../domain/catalog';
 import { alter } from './attention';
 import { isChiral, SHAPES } from './logic';
 import { nbackStream } from './memory';
@@ -122,5 +124,48 @@ describe('adaptation', () => {
     expect(streak([d(0), d(1), d(2), d(4)])).toBe(3);
     expect(streak([d(1), d(2)])).toBe(2);
     expect(streak([d(3)])).toBe(0);
+  });
+});
+
+describe('coach plateformes', () => {
+  const t = (over: Partial<ExtTest>): ExtTest => ({ id: 'pilotest:a', source: 'pilotest', name: 'A', stage: 'psy1', aptitudes: [], target: 6, weak: false, active: true, ...over });
+  const ext = (id: string, stanine: number | undefined, daysAgo = 0): Result => {
+    const d = new Date(); d.setDate(d.getDate() - daysAgo);
+    return { date: d.toISOString(), source: 'pilotest', exerciseId: id, exerciseName: id, category: 'autre', stanine };
+  };
+  it('catalogue : identifiants uniques, 16 tests psy1 et 14 psy0', () => {
+    expect(new Set(SEED.map((x) => x.id)).size).toBe(SEED.length);
+    expect(SEED.filter((x) => x.stage === 'psy1')).toHaveLength(16);
+    expect(SEED.filter((x) => x.stage === 'psy0')).toHaveLength(14);
+  });
+  it('un test sous l’objectif passe avant un test au-dessus, à ancienneté égale', () => {
+    const tests = [t({ id: 'p:haut', name: 'Haut' }), t({ id: 'p:bas', name: 'Bas' })];
+    const r = rankExternal(tests, [ext('p:haut', 8), ext('p:bas', 3)]);
+    expect(r[0].test.id).toBe('p:bas');
+    expect(r[0].reason).toContain('Stanine récente 3');
+  });
+  it('la stanine récente est la moyenne des 3 dernières saisies', () => {
+    const p = extPriority(t({}), [ext('pilotest:a', 6, 0), ext('pilotest:a', 5, 1), ext('pilotest:a', 4, 2), ext('pilotest:a', 1, 3)]);
+    expect(p.stats.recent).toBe(5);
+    expect(p.stats.best).toBe(6);
+  });
+  it('un point faible déclaré remonte dans le classement', () => {
+    const tests = [t({ id: 'p:x', name: 'X' }), t({ id: 'p:y', name: 'Y', weak: true })];
+    expect(rankExternal(tests, [ext('p:x', 5), ext('p:y', 5)])[0].test.id).toBe('p:y');
+  });
+  it('ignore les tests désactivés et respecte le budget de minutes', () => {
+    const tests = [t({ id: 'p:1', minutes: 30 }), t({ id: 'p:2', minutes: 20 }), t({ id: 'p:3', minutes: 10 }), t({ id: 'p:off', active: false })];
+    const plan = composeExternal(30, tests, []);
+    expect(plan.some((p) => p.testId === 'p:off')).toBe(false);
+    const total = plan.reduce((s, p) => s + tests.find((x) => x.id === p.testId)!.minutes!, 0);
+    expect(total).toBeLessThanOrEqual(30);
+    expect(plan.length).toBeGreaterThanOrEqual(1);
+  });
+  it('sans aucune saisie, propose de situer le niveau', () => {
+    expect(composeExternal(15, SEED, [])[0].reason).toContain('Jamais saisi');
+  });
+  it('les domaines renforcés remontent dans la séance du téléphone', () => {
+    const all = EXERCISE_LIST.map((e) => res({ exerciseId: e.id, category: e.category, correct: 9 }));
+    expect(EXERCISES[composeSession(2, all, new Date(), ['spatial'])[0].exerciseId].category).toBe('spatial');
   });
 });

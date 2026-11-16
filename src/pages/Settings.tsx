@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
-import { db, DEFAULT_SETTINGS, saveSettings, type Settings as S } from '../db';
+import { CATEGORIES, type CategoryId, db, DEFAULT_SETTINGS, saveSettings, type Settings as S } from '../db';
+import { EXERCISE_LIST } from '../exercises/registry';
 import { deliverFile, exportData, importData } from '../domain/backup';
 import { fmtDate } from '../ui';
 
@@ -85,6 +86,45 @@ export default function Settings() {
         </div>
 
         <div className="card stack">
+          <h2>Travail sur plateforme</h2>
+          <p className="muted">Le plan du jour ajoute des tests Pilotest / EPL Test les jours où tu as un ordinateur, choisis selon tes stanines.</p>
+          <label className="field">Temps de plateforme par jour
+            <select value={s.externalMinutes} onChange={(e) => void saveSettings({ externalMinutes: Number(e.target.value) })}>
+              <option value={0}>Ne rien prescrire</option>
+              <option value={15}>15 min</option>
+              <option value={30}>30 min</option>
+              <option value={45}>45 min</option>
+              <option value={60}>60 min</option>
+            </select>
+          </label>
+          <div className="field" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, color: 'var(--muted)', fontWeight: 600 }}>
+            Jours avec ordinateur
+            <div className="days">
+              {DAYS.map((d, i) => (
+                <button key={i} className={s.computerDays.includes(i) ? 'on' : ''}
+                  onClick={() => void saveSettings({ computerDays: s.computerDays.includes(i) ? s.computerDays.filter((x) => x !== i) : [...s.computerDays, i] })}>
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="card stack">
+          <h2>Domaines à renforcer</h2>
+          <p className="muted">Les domaines cochés passent plus souvent dans la séance du jour sur téléphone (priorité × 1,3).</p>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+            {(Object.keys(CATEGORIES) as CategoryId[]).filter((c) => EXERCISE_LIST.some((e) => e.category === c)).map((c) => (
+              <button key={c} className={`btn sm ${s.focusCategories.includes(c) ? '' : 'ghost'}`}
+                onClick={() => void saveSettings({ focusCategories: s.focusCategories.includes(c) ? s.focusCategories.filter((x) => x !== c) : [...s.focusCategories, c] })}>
+                {CATEGORIES[c]}
+              </button>
+            ))}
+          </div>
+          <p className="muted small">Les changements s’appliquent au prochain plan, ou tout de suite avec « Recalculer le plan du jour » sur l’accueil.</p>
+        </div>
+
+        <div className="card stack">
           <h2>Sauvegarde</h2>
           <p className="muted">
             {count ?? 0} résultat{(count ?? 0) > 1 ? 's' : ''} sur cet appareil.{' '}
@@ -112,13 +152,13 @@ export default function Settings() {
           </p>
           <button className="btn danger" onClick={async () => {
             if (wipe < 2) return setWipe(wipe + 1);
-            await Promise.all([db.results.clear(), db.levels.clear(), db.kv.clear()]);
+            await Promise.all([db.results.clear(), db.levels.clear(), db.kv.clear(), db.extTests.clear()]);
             setWipe(0); info('Toutes les données ont été effacées.');
           }}>
             {wipe === 0 ? 'Effacer toutes les données' : wipe === 1 ? 'Vraiment tout effacer ? Touchez encore' : 'Dernière confirmation : effacer définitivement'}
           </button>
         </div>
-        <p className="muted small" style={{ textAlign: 'center' }}>Cap Cadets 0.1 · lot 1 · aucune donnée ne quitte cet appareil</p>
+        <p className="muted small" style={{ textAlign: 'center' }}>Cap Cadets 0.2 · aucune donnée ne quitte cet appareil</p>
       </main>
     </div>
   );
