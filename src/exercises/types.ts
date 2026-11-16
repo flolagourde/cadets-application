@@ -3,9 +3,16 @@ import type { CategoryId } from '../db';
 /** Figure sur grille : true = case pleine. */
 export type Figure = boolean[][];
 
+/** Case d'une matrice logique : forme, nombre, remplissage et taille valent chacun 0, 1 ou 2. */
+export interface Cell { shape: number; count: number; fill: number; size: number }
+
+/** Cadran à aiguille gradué de 0 à 9 : position de l'aiguille (0 à 10) et sens de graduation. */
+export interface DialSpec { pos: number; ccw: boolean }
+
 export interface Choice {
   label?: string;
   figure?: Figure;
+  cell?: Cell;
 }
 
 export interface Item {
@@ -20,12 +27,22 @@ export interface Item {
   grid?: string[][];
   pair?: [string, string];
   figure?: Figure;
+  /** Lignes d'énoncé affichées l'une sous l'autre (équations, listes). */
+  lines?: string[];
+  dials?: DialSpec[];
+  /** Les 8 premières cases d'une matrice 3 × 3 ; la neuvième est à trouver. */
+  matrix?: Cell[];
   tint?: 'blue' | 'amber';
   /** Stimulus seulement observé (non noté), avance automatiquement. */
   observeMs?: number;
   /** Phase de mémorisation avant la réponse (non chronométrée). */
   memorize?: { tokens: string[]; perTokenMs: number };
-  kind: 'numeric' | 'choice' | 'none';
+  /** multi : plusieurs propositions à cocher ; réponse = indices triés séparés par des virgules, ou 'none'. */
+  kind: 'numeric' | 'choice' | 'multi' | 'none';
+  /** numeric : la réponse peut être négative (touche ± au pavé). */
+  signed?: boolean;
+  /** multi : proposer le bouton « Aucun ». */
+  allowNone?: boolean;
   choices?: Choice[];
   /** Réponse attendue : nombre (numeric), chaîne exacte (digits) ou index du choix. */
   answer: string;
@@ -48,6 +65,8 @@ export interface ExerciseDef {
   fast?: boolean;
   /** Quiz de connaissances : pas de niveau de difficulté, suivi par question. */
   noLevel?: boolean;
+  /** Durée fixe en secondes : la séance s'arrête au bout du temps, quel que soit le nombre d'items traités. */
+  timeLimitS?: number;
   generate: (level: number, stats?: Record<string, [number, number]>) => Item[];
 }
 

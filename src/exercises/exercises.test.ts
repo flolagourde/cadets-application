@@ -4,6 +4,7 @@ import type { ExtTest } from '../db';
 import { composeExternal, composeSession, decideLevel, extPriority, rankExternal, streak } from '../domain/adaptive';
 import { SEED } from '../domain/catalog';
 import { alter } from './attention';
+import { buildMatrix, cascade, dialBoard, NUMBER_LAWS, readDial, signedSum, WORD_LAWS } from './critical';
 import { isChiral, SHAPES } from './logic';
 import { nbackStream } from './memory';
 import { PASSAGES, VOCAB } from '../content/english';
@@ -23,15 +24,19 @@ describe('générateurs', () => {
           for (const it of items) {
             if (it.kind === 'none') { expect(it.observeMs).toBeGreaterThan(0); continue; }
             expect(it.explain.length).toBeGreaterThan(0);
-            if (it.kind === 'choice') {
+            if (it.kind === 'multi') {
+              expect(it.answer).toMatch(/^(none|\d(,\d)*)$/);
+              if (it.answer === 'none') expect(it.allowNone).toBe(true);
+              expect(new Set(it.choices!.map((c) => c.label)).size).toBe(it.choices!.length);
+            } else if (it.kind === 'choice') {
               const n = it.choices!.length;
               expect(n).toBeGreaterThanOrEqual(2);
               expect(Number(it.answer)).toBeGreaterThanOrEqual(0);
               expect(Number(it.answer)).toBeLessThan(n);
-              const keys = it.choices!.map((c) => c.label ?? figKey(c.figure!));
+              const keys = it.choices!.map((c) => c.label ?? (c.cell ? JSON.stringify(c.cell) : figKey(c.figure!)));
               expect(new Set(keys).size).toBe(n); // aucune proposition en double
             } else {
-              expect(it.answer).toMatch(/^\d+$/); // saisissable au pavé numérique
+              expect(it.answer).toMatch(it.signed ? /^-?\d+$/ : /^\d+$/); // saisissable au pavé numérique
             }
           }
         }
@@ -221,5 +226,91 @@ describe('bibliothèque et quiz', () => {
     const items = EXERCISES['en-reading'].generate(1);
     expect(new Set(items.map((i) => i.passage)).size).toBe(1);
     expect(items.every((i) => i.limitMs === 45000)).toBe(true);
+  });
+});
+
+describe('exercices ciblés', () => {
+  // évalue une expression de cascade avec les valeurs déjà connues
+  const evalExpr = (expr: string, env: Record<string, number>) => {
+    const js = expr.replace(/−/g, '-').replace(/×/g, '*').replace(/[abcd]/g, (m) => `(${env[m]})`);
+    expect(js).toMatch(/^[\d\s()+*-]+$/);
+    return Function(`return ${js}`)() as number;
+  };
+  it('cascade : chaque ligne se recalcule à partir des précédentes', () => {
+    for (let level = 1; level <= 10; level++) for (let rep = 0; rep < 200; rep++) {
+      const c = cascade(level);
+      const env: Record<string, number> = {};
+      c.lines.forEach((line, i) => {
+        const [name, expr] = line.split(' = ');
+        env[name] = evalExpr(expr, env);
+        expect(env[name]).toBe(c.values[i]);
+      });
+      expect(c.lines.length).toBe(level >= 5 ? 4 : 3);
+    }
+  });
+  it('sommes signées : les intervalles cochés sont exactement ceux qui contiennent le total', () => {
+    for (let level = 1; level <= 10; level++) for (let rep = 0; rep < 100; rep++) {
+      const s = signedSum(level);
+      expect(s.total).toBe(s.terms.reduce((a, b) => a + b, 0));
+      for (const it of EXERCISES['calc-signed'].generate(level)) {
+        const total = Number(it.explain.match(/Résultat : (−?\d+)/)![1].replace('−', '-'));
+        const right = it.choices!.map((c, i) => {
+          const [lo, hi] = c.label!.replace(/[\[\]]/g, '').split(' ; ').map((x) => Number(x.replace('−', '-')));
+          return lo <= total && total <= hi ? i : -1;
+        }).filter((i) => i >= 0);
+        expect(it.answer).toBe(right.length ? right.join(',') : 'none');
+        expect(it.choices).toHaveLength(5);
+      }
+    }
+  });
+  it('cadrans : la lecture de chaque aiguille redonne la valeur', () => {
+    for (let level = 1; level <= 10; level++) for (let rep = 0; rep < 500; rep++) {
+      const b = dialBoard(level);
+      expect(Number(b.dials.map(readDial).join(''))).toBe(b.value);
+      expect(b.dials.some((d) => d.ccw)).toBe(level >= 3);
+    }
+  });
+  it('loi commune : exemples, contre-exemples et réponses respectent la loi annoncée', () => {
+    const laws = [...NUMBER_LAWS.map((l) => ({ text: l.text, test: (x: string) => l.test(Number(x)) })), ...WORD_LAWS];
+    for (let level = 1; level <= 10; level++) for (let rep = 0; rep < 40; rep++) {
+      for (const it of EXERCISES['logic-law'].generate(level)) {
+        const text = it.explain.match(/^Loi : (.+?)\. Éléments/)![1];
+        const law = laws.find((l) => l.text === text)!;
+        const list = (line: string) => line.split(' : ')[1].split(' · ');
+        expect(list(it.lines![0]).every(law.test)).toBe(true);
+        expect(list(it.lines![1]).some(law.test)).toBe(false);
+        const right = it.choices!.map((c, i) => (law.test(c.label!) ? i : -1)).filter((i) => i >= 0);
+        expect(right.length).toBeGreaterThanOrEqual(1);
+        expect(it.answer).toBe(right.join(','));
+        expect(it.choices).toHaveLength(6);
+      }
+    }
+  });
+  it('matrices : la case manquante est la seule proposition compatible avec les règles', () => {
+    for (let level = 1; level <= 10; level++) for (let rep = 0; rep < 100; rep++) {
+      const m = buildMatrix(level);
+      expect(m.cells).toHaveLength(9);
+      for (const a of ['shape', 'count', 'fill', 'size'] as const) {
+        const v = (r: number, c: number) => m.cells[r * 3 + c][a];
+        const rule = m.rules[a];
+        for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+          if (rule === 'const') expect(v(r, c)).toBe(v(0, 0));
+          if (rule === 'row') expect(v(r, c)).toBe(v(r, 0));
+          if (rule === 'col') expect(v(r, c)).toBe(v(0, c));
+        }
+        if (rule === 'latin') for (let i = 0; i < 3; i++) {
+          expect(new Set([v(i, 0), v(i, 1), v(i, 2)]).size).toBe(3);
+          expect(new Set([v(0, i), v(1, i), v(2, i)]).size).toBe(3);
+        }
+      }
+    }
+    for (const it of EXERCISES['logic-matrix'].generate(8)) {
+      expect(it.choices).toHaveLength(6);
+      expect(it.matrix).toHaveLength(8);
+    }
+  });
+  it('sprint : durée fixe et réserve d’items suffisante', () => {
+    expect(EXERCISES['calc-sprint'].timeLimitS).toBe(90);
+    expect(EXERCISES['calc-sprint'].generate(1).length).toBeGreaterThanOrEqual(100);
   });
 });

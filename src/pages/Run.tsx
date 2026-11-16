@@ -7,21 +7,23 @@ import { doneToday, type DayPlan, nextInPlan } from '../domain/plan';
 import type { QStats } from '../content/quiz';
 import { getExercise } from '../exercises/registry';
 import type { ExerciseDef, Item } from '../exercises/types';
-import { FigureView, fmtSec, Keypad } from '../ui';
+import { Dial, FigureView, fmtSec, Keypad, MatrixCell } from '../ui';
 
 interface LogEntry { item: Item; given: string | null; ok: boolean; ms: number }
 type Stage = 'gap' | 'memorize' | 'observe' | 'answer' | 'feedback';
 
 function isCorrect(item: Item, given: string | null): boolean {
-  if (given === null || given === '') return false;
+  if (given === null || given === '' || given === '-') return false;
   if (item.kind === 'numeric' && !item.exact) return Number(given) === Number(item.answer);
   return given === item.answer;
 }
 
 function label(item: Item, value: string | null): string {
   if (value === null) return 'pas de réponse (temps écoulé)';
-  if (item.kind === 'choice') return item.choices?.[Number(value)]?.label ?? `proposition ${Number(value) + 1}`;
-  return value;
+  const one = (v: string) => item.choices?.[Number(v)]?.label ?? `proposition ${Number(v) + 1}`;
+  if (item.kind === 'multi') return value === 'none' ? 'aucun' : value.split(',').map(one).join(' ; ');
+  if (item.kind === 'choice') return one(value);
+  return value.replace('-', '−');
 }
 
 function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; level: number; stats: QStats; onFinish: (log: LogEntry[], durationS: number) => void; onQuit: () => void }) {
@@ -31,35 +33,54 @@ function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; le
   const [stage, setStage] = useState<Stage>('gap');
   const [token, setToken] = useState<string | null>(null);
   const [input, setInput] = useState('');
+  const [multi, setMulti] = useState<number[]>([]);
   const [last, setLast] = useState<LogEntry | null>(null);
+  const [left, setLeft] = useState(def.timeLimitS ?? 0);
   const log = useRef<LogEntry[]>([]);
   const t0 = useRef(0);
   const started = useRef(performance.now());
+  const finished = useRef(false);
   const item = items[idx];
 
+  const finish = () => {
+    if (finished.current) return;
+    finished.current = true;
+    onFinish(log.current, Math.round((performance.now() - started.current) / 1000));
+  };
+
   const next = () => {
-    if (idx + 1 >= items.length) {
-      onFinish(log.current, Math.round((performance.now() - started.current) / 1000));
-      return;
-    }
+    if (idx + 1 >= items.length) return finish();
     setInput('');
+    setMulti([]);
     setIdx(idx + 1);
     setStage('gap');
   };
 
   const submit = (given: string | null) => {
-    if (stage !== 'answer') return;
+    if (stage !== 'answer' || finished.current) return;
     const entry: LogEntry = { item, given, ok: isCorrect(item, given), ms: Math.round(performance.now() - t0.current) };
     log.current.push(entry);
     setLast(entry);
     setStage('feedback');
   };
 
+  // Exercices à durée fixe : la séance s'arrête quand le temps est écoulé.
+  useEffect(() => {
+    if (!def.timeLimitS) return;
+    const t = window.setInterval(() => {
+      const remaining = def.timeLimitS! - (performance.now() - started.current) / 1000;
+      setLeft(Math.max(0, Math.ceil(remaining)));
+      if (remaining <= 0) finish();
+    }, 250);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const timers: number[] = [];
     const later = (fn: () => void, ms: number) => timers.push(window.setTimeout(fn, ms));
     if (stage === 'gap') {
-      later(() => setStage(item.memorize ? 'memorize' : item.observeMs ? 'observe' : 'answer'), 220);
+      later(() => setStage(item.memorize ? 'memorize' : item.observeMs ? 'observe' : 'answer'), def.timeLimitS ? 80 : 220);
     } else if (stage === 'memorize' && item.memorize) {
       const { tokens, perTokenMs } = item.memorize;
       tokens.forEach((t, i) => {
@@ -75,7 +96,7 @@ function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; le
     } else if (stage === 'feedback' && last) {
       // Bonne réponse : enchaînement automatique. Erreur hors tâche de cadence : l'utilisateur lit la correction.
       if (last.ok) later(next, def.fast ? 250 : 450);
-      else if (def.fast) later(next, 800);
+      else if (def.fast) later(next, def.timeLimitS ? 500 : 800);
     }
     return () => timers.forEach((t) => window.clearTimeout(t));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -83,16 +104,28 @@ function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; le
 
   const scoredTotal = items.filter((i) => i.kind !== 'none').length;
   const maxLen = item.kind === 'numeric' ? Math.max(item.answer.length + 2, 4) : 0;
-  // Propositions courtes ou figures : deux colonnes. Phrases : une colonne, plus lisible.
-  const twoCols = item.choices?.every((c) => c.figure || (c.label ?? '').length <= 16) ?? false;
+  // Figures et propositions courtes : plusieurs colonnes. Phrases : une colonne, plus lisible.
+  const cols = item.choices?.every((c) => c.cell) ? 'three'
+    : item.choices?.every((c) => c.figure || (c.label ?? '').length <= 16) ? 'two' : '';
   const reading = (stage === 'answer' || stage === 'observe') && !!item.passage;
+  const toggle = (i: number) => setMulti((m) => (m.includes(i) ? m.filter((x) => x !== i) : [...m, i]));
+  const plain = !(item.grid || item.pair || item.figure || item.memorize || item.qid || item.dials || item.matrix || item.kind === 'multi' && item.lines);
 
   return (
     <div className="run">
       <div className="runbar">
         <button onClick={onQuit}>Quitter</button>
-        <div className="progress"><i style={{ width: `${(log.current.length / scoredTotal) * 100}%` }} /></div>
-        <span className="small">{log.current.length}/{scoredTotal}</span>
+        {def.timeLimitS ? (
+          <>
+            <div className="progress"><i style={{ width: `${100 - (left / def.timeLimitS) * 100}%` }} /></div>
+            <span className="small">{left} s · {log.current.filter((l) => l.ok).length} ✓</span>
+          </>
+        ) : (
+          <>
+            <div className="progress"><i style={{ width: `${(log.current.length / scoredTotal) * 100}%` }} /></div>
+            <span className="small">{log.current.length}/{scoredTotal}</span>
+          </>
+        )}
       </div>
 
       <div className={`stage ${reading ? 'reading' : ''}`}>
@@ -108,6 +141,9 @@ function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; le
 
         {(stage === 'observe' || stage === 'answer') && (
           <>
+            {item.lines && (
+              <div className="lines">{item.lines.map((l, i) => <div key={i}>{l}</div>)}</div>
+            )}
             {item.big ? (
               <>
                 <div className={`bigstim ${item.tint ?? ''}`}>{item.prompt}</div>
@@ -115,7 +151,7 @@ function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; le
               </>
             ) : (
               <>
-                <p className={`prompt ${item.grid || item.pair || item.figure || item.memorize || item.qid ? 'q' : ''}`}>{item.prompt}</p>
+                <p className={`prompt ${plain ? '' : 'q'} ${item.kind === 'multi' && !item.lines ? 'expr' : ''}`}>{item.prompt}</p>
                 {item.sub && <p className="muted">{item.sub}</p>}
               </>
             )}
@@ -126,10 +162,20 @@ function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; le
             )}
             {item.pair && <div className="pair">{item.pair[0]}<br />{item.pair[1]}</div>}
             {item.figure && <FigureView figure={item.figure} size={130} />}
+            {item.dials && (
+              <div className="row" style={{ gap: 6 }}>
+                {item.dials.map((d, i) => <Dial key={i} dial={d} size={item.dials!.length > 3 ? 82 : 100} />)}
+              </div>
+            )}
+            {item.matrix && (
+              <div className="matrix">
+                {[...item.matrix, null].map((c, i) => <MatrixCell key={i} cell={c} size={70} />)}
+              </div>
+            )}
             {stage === 'answer' && item.limitMs && (
               <div className="limit"><i key={idx} style={{ animationDuration: `${item.limitMs}ms` }} /></div>
             )}
-            {stage === 'answer' && item.kind === 'numeric' && <div className="answer">{input}</div>}
+            {stage === 'answer' && item.kind === 'numeric' && <div className="answer">{input.replace('-', '−')}</div>}
           </>
         )}
 
@@ -152,17 +198,31 @@ function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; le
           <Keypad
             onKey={(d) => setInput((v) => (v.length < maxLen ? v + d : v))}
             onDel={() => setInput((v) => v.slice(0, -1))}
+            onSign={item.signed ? () => setInput((v) => (v.startsWith('-') ? v.slice(1) : `-${v}`)) : undefined}
             onOk={() => submit(input)}
-            okDisabled={input === ''}
+            okDisabled={input === '' || input === '-'}
           />
         )}
         {stage === 'answer' && item.kind === 'choice' && item.choices && (
-          <div className={`choices ${twoCols ? 'two' : ''}`}>
+          <div className={`choices ${cols}`}>
             {item.choices.map((c, i) => (
               <button key={i} onClick={() => submit(String(i))}>
-                {c.figure ? <FigureView figure={c.figure} size={96} /> : c.label}
+                {c.figure ? <FigureView figure={c.figure} size={96} /> : c.cell ? <MatrixCell cell={c.cell} size={72} /> : c.label}
               </button>
             ))}
+          </div>
+        )}
+        {stage === 'answer' && item.kind === 'multi' && item.choices && (
+          <div className="stack">
+            <div className="choices two">
+              {item.choices.map((c, i) => (
+                <button key={i} className={multi.includes(i) ? 'sel' : ''} onClick={() => toggle(i)}>{c.label}</button>
+              ))}
+            </div>
+            <div className={item.allowNone ? 'grid2' : ''}>
+              {item.allowNone && <button className="btn ghost" onClick={() => submit('none')}>Aucun</button>}
+              <button className="btn block" disabled={!multi.length} onClick={() => submit([...multi].sort((x, y) => x - y).join(','))}>Valider</button>
+            </div>
           </div>
         )}
       </div>
@@ -201,7 +261,10 @@ export default function Run() {
   const finish = async (log: LogEntry[], durationS: number) => {
     const correct = log.filter((l) => l.ok).length;
     const errors: ErrorItem[] = log.filter((l) => !l.ok).map((l) => ({
-      prompt: l.item.memorize ? `Suite : ${l.item.memorize.tokens.join(' ')}` : l.item.pair ? l.item.pair.join(' / ') : l.item.prompt,
+      prompt: l.item.memorize ? `Suite : ${l.item.memorize.tokens.join(' ')}`
+        : l.item.pair ? l.item.pair.join(' / ')
+        : l.item.lines ? l.item.lines.join(' ; ')
+        : l.item.prompt,
       given: label(l.item, l.given),
       expected: label(l.item, l.item.answer),
       explain: l.item.explain,
@@ -272,6 +335,7 @@ export default function Run() {
         <div className="page">
           <div className="card" style={{ textAlign: 'center' }}>
             <div className="score">{summary.result.correct}/{summary.result.total}</div>
+            {def.timeLimitS && <p className="muted">{summary.result.correct} bonnes réponses en {def.timeLimitS} secondes</p>}
             <p className="muted">
               Précision {summary.result.scorePct} % · temps médian {fmtSec(summary.result.medianMs ?? 0)}{summary.decision ? ` · niveau ${summary.previousLevel}` : ''}
             </p>

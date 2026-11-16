@@ -1,6 +1,7 @@
 import type { CategoryId } from '../db';
 import { attCompare, attSearch, attSwitch } from './attention';
 import { calcEstimate, calcOps, calcPercent } from './calc';
+import { attDials, calcCascade, calcSigned, calcSprint, logicLaw, logicMatrix } from './critical';
 import { logicSeries, spatialRotation } from './logic';
 import { memNback, memSpan } from './memory';
 import { ficheQuiz, QUIZ_THEMES, quizReading, quizVocab } from '../content/quiz';
@@ -8,10 +9,10 @@ import type { ExerciseDef } from './types';
 
 /** Pour ajouter un exercice : écrire un ExerciseDef et l'inscrire ici. */
 export const EXERCISE_LIST: ExerciseDef[] = [
-  calcOps, calcPercent, calcEstimate,
+  calcOps, calcSprint, calcCascade, calcSigned, calcPercent, calcEstimate,
   memSpan, memNback,
-  attSearch, attCompare, attSwitch,
-  logicSeries,
+  attDials, attSearch, attCompare, attSwitch,
+  logicLaw, logicMatrix, logicSeries,
   spatialRotation,
   ...QUIZ_THEMES,
   quizVocab, quizReading,

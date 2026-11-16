@@ -34,6 +34,8 @@ function opItem(level: number): Item {
   };
 }
 
+export const opItemForSprint = opItem;
+
 export const calcOps: ExerciseDef = {
   id: 'calc-ops',
   name: 'Opérations rapides',

@@ -3,18 +3,24 @@
 Application personnelle (PWA) de préparation aux sélections Cadets et au BIA.
 Toutes les données restent sur l'appareil (IndexedDB) : aucun compte, aucun serveur, aucun suivi.
 
-## État : lot 1
+## État
 
-- 10 exercices générés à l'infini, 10 niveaux chacun : calcul (opérations, pourcentages/fractions, estimation),
-  mémoire (empan de chiffres, N-back), attention (recherche de symboles, comparaison de séquences, changement de règle),
-  logique (suites numériques), spatial (rotation mentale).
-- Correction, explication des erreurs, enregistrement automatique.
-- Niveau adaptatif explicable et séance du jour composée selon les résultats (`src/domain/adaptive.ts`).
-- Saisie manuelle des résultats Pilotest / EPL Test, historique filtrable, synthèse par domaine.
-- Sauvegarde / restauration, chiffrement AES-256-GCM facultatif.
+- **Entraînement sur téléphone** : 16 exercices générés à l'infini, 10 niveaux chacun, niveau adaptatif expliqué.
+  Six ciblent les aptitudes des tests les plus sélectifs : sprint de calcul (durée fixe), équations en cascade,
+  sommes signées et intervalles, lecture de cadrans, loi commune, matrices.
+- **Coach** : le plan du jour combine une séance sur téléphone et des tests de plateforme (Pilotest, EPL Test)
+  choisis selon les stanines saisies, l'ancienneté et les points faibles déclarés.
+- **Suivi** : catalogue des tests psy0 / psy1, saisie en trois touches, objectifs de stanine, historique, synthèse.
+  Les résultats des plateformes ne sont jamais mélangés à ceux de l'app.
+- **Bibliothèque** : fiches datées et sourcées (Air France, institutions, sélection, repères techniques) avec quiz,
+  vocabulaire aéronautique et compréhension écrite en anglais. Les questions ratées reviennent en priorité.
+- **Données** : tout reste sur l'appareil. Sauvegarde et restauration, chiffrement AES-256-GCM facultatif.
 - Installable et utilisable hors connexion.
 
-À venir : module BIA (pack de contenus importé), calendrier, bilans, bibliothèque. Voir le document de conception du projet.
+À venir : module BIA (fiches et QCM tirés du livret), calendrier, bilans hebdomadaires, page d'astuces.
+
+Les fiches de `src/content/` portent une date de vérification (`asOf`) : les données de flotte, de dirigeants et de
+réseau sont à revérifier avant chaque sélection.
 
 ## Lancer en local
 
