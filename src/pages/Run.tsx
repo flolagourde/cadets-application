@@ -8,7 +8,7 @@ import type { QStats } from '../content/quiz';
 import { biaExercise, loadPack, loadSrs, recordSrs } from '../domain/bia';
 import { getExercise } from '../exercises/registry';
 import type { ExerciseDef, Item } from '../exercises/types';
-import { Dial, FigureView, fmtSec, Keypad, MatrixCell } from '../ui';
+import { Dial, FigureView, fmtMin, fmtSec, Keypad, MatrixCell } from '../ui';
 
 interface LogEntry { item: Item; given: string | null; ok: boolean; ms: number }
 type Stage = 'gap' | 'memorize' | 'observe' | 'answer' | 'feedback';
@@ -120,7 +120,7 @@ function Session({ def, level, stats, onFinish, onQuit }: { def: ExerciseDef; le
         {def.timeLimitS ? (
           <>
             <div className="progress"><i style={{ width: `${100 - (left / def.timeLimitS) * 100}%` }} /></div>
-            <span className="small">{left >= 100 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : `${left} s`}{def.silent ? ` · ${log.current.length}/${scoredTotal}` : ` · ${log.current.filter((l) => l.ok).length} ✓`}</span>
+            <span className="small">{left >= 3600 ? `${Math.floor(left / 3600)} h ${String(Math.floor((left % 3600) / 60)).padStart(2, '0')}` : left >= 100 ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : `${left} s`}{def.silent ? ` · ${log.current.length}/${scoredTotal}` : ` · ${log.current.filter((l) => l.ok).length} ✓`}</span>
           </>
         ) : (
           <>
@@ -355,7 +355,7 @@ export default function Run() {
             {def.silent && summary.result.total ? (
               <p style={{ fontWeight: 650 }}>Note : {(((summary.result.correct ?? 0) / summary.result.total) * 20).toFixed(1).replace('.', ',')} / 20</p>
             ) : null}
-            {def.timeLimitS && <p className="muted">{summary.result.correct} bonnes réponses en {def.timeLimitS} secondes</p>}
+            {def.timeLimitS && <p className="muted">{summary.result.correct} bonnes réponses en {def.timeLimitS < 120 ? `${def.timeLimitS} secondes` : fmtMin(def.timeLimitS)}</p>}
             <p className="muted">
               Précision {summary.result.scorePct} % · temps médian {fmtSec(summary.result.medianMs ?? 0)}{summary.decision ? ` · niveau ${summary.previousLevel}` : ''}
             </p>
