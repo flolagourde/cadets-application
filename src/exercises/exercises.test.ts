@@ -12,6 +12,8 @@ import { PASSAGES, VOCAB } from '../content/english';
 import { FICHES } from '../content/fiches';
 import { pickQuestions } from '../content/quiz';
 import { EXERCISE_LIST, EXERCISES, getExercise } from './registry';
+import { DAILY, DAILY_BATCH, DAILY_THEMES } from '../content/daily';
+import { dailyExercise, dailyState, dailyStreak, dueDailyQids } from '../domain/daily';
 
 const figKey = (f: boolean[][]) => f.map((r) => r.map((c) => (c ? 1 : 0)).join('')).join('/');
 
@@ -401,5 +403,83 @@ describe('module BIA', () => {
     expect(partStatus(part, true, seen, [quiz(0.9, 0), quiz(0.8, 1), quiz(1, 2)])).toBe('mastered');
     expect(partStatus(part, false, seen, [quiz(0.9, 0), quiz(0.8, 1), quiz(1, 2)])).toBe('mastered');
     expect(partStatus(part, true, {}, [quiz(0.9, 0), quiz(0.8, 1), quiz(1, 2)])).toBe('progress'); // questions non toutes vues
+  });
+});
+
+describe('fait du jour', () => {
+  it('le lot compte 60 faits, dont 2 jours sur 7 en aéronautique', () => {
+    expect(DAILY.length).toBe(DAILY_BATCH.days);
+    const aero = DAILY.map((f, i) => (f.theme === 'aero' ? i : -1)).filter((i) => i >= 0);
+    expect(aero.length).toBe(17);
+    for (const i of aero) expect([1, 4]).toContain(i % 7);
+    // pas deux fois de suite le même thème
+    for (let i = 1; i < DAILY.length; i++) expect(DAILY[i].theme).not.toBe(DAILY[i - 1].theme);
+    // chaque thème hors aéronautique revient au moins 7 fois
+    for (const t of Object.keys(DAILY_THEMES).filter((x) => x !== 'aero')) expect(DAILY.filter((f) => f.theme === t).length).toBeGreaterThanOrEqual(7);
+  });
+
+  it('contenus bien formés : identifiants uniques, 4 choix distincts, explications', () => {
+    const ids = DAILY.map((f) => f.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const qids = DAILY.flatMap((f) => f.questions.map((x) => x.id));
+    expect(new Set(qids).size).toBe(qids.length);
+    for (const f of DAILY) {
+      expect(f.points.length).toBeGreaterThanOrEqual(4);
+      expect(f.retenir.length).toBeGreaterThan(10);
+      expect(f.asOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      for (const x of f.questions) {
+        expect(x.id.startsWith(f.id)).toBe(true);
+        expect(new Set(x.choices).size).toBe(4);
+        expect(x.explain.length).toBeGreaterThan(5);
+      }
+      // une donnée datée doit être signalée comme telle sur le fait
+      if (f.questions.some((x) => x.volatile)) expect(f.volatile).toBe(true);
+    }
+  });
+
+  it('la bonne réponse ne se devine pas à sa longueur', () => {
+    const all = DAILY.flatMap((f) => f.questions);
+    const tooLong = all.filter((x) => { const n = x.choices.map((c) => c.length); return n[0] > 12 && n[0] > 1.3 * Math.max(...n.slice(1)); });
+    expect(tooLong.map((x) => x.id)).toEqual([]);
+    const longest = all.filter((x) => { const n = x.choices.map((c) => c.length); return n[0] > Math.max(...n.slice(1)); }).length;
+    expect(longest / all.length).toBeLessThan(0.4);
+  });
+
+  it('progression : un fait par jour, un jour manqué n’est pas perdu', () => {
+    const d1 = new Date(2026, 10, 17, 9);
+    let st = dailyState({}, d1);
+    expect(st.fact?.id).toBe(DAILY[0].id);
+    expect(st.doneToday).toBe(false);
+    const log: Record<string, string> = { [DAILY[0].id]: '2026-11-17' };
+    st = dailyState(log, d1);
+    expect(st.doneToday).toBe(true);
+    expect(st.fact?.id).toBe(DAILY[0].id);
+    // trois jours plus tard, on reprend au fait suivant
+    st = dailyState(log, new Date(2026, 10, 20, 9));
+    expect(st.fact?.id).toBe(DAILY[1].id);
+    expect(st.rank).toBe(2);
+    expect(dailyStreak(log, d1)).toBe(1);
+    expect(dailyStreak({ ...log, [DAILY[1].id]: '2026-11-18' }, new Date(2026, 10, 18, 20))).toBe(2);
+  });
+
+  it('séance : deux questions du jour puis trois rappels au plus, jamais sur des faits non vus', () => {
+    const now = new Date(2026, 10, 25, 9);
+    const log: Record<string, string> = {};
+    let srs = {};
+    for (let i = 0; i < 5; i++) {
+      log[DAILY[i].id] = '2026-11-18';
+      for (const x of DAILY[i].questions) srs = srsUpdate(srs, x.id, false, new Date(2026, 10, 18));
+    }
+    // une question d'un fait jamais vu, due elle aussi, ne doit pas sortir
+    srs = srsUpdate(srs, DAILY[10].questions[0].id, false, new Date(2026, 10, 18));
+    const ex = dailyExercise(`daily:${DAILY[5].id}`, srs, log, now)!;
+    const items = ex.generate(1);
+    expect(items.length).toBe(2 + 3);
+    expect(items.slice(0, 2).every((it) => it.qid!.startsWith(DAILY[5].id))).toBe(true);
+    expect(items.slice(2).every((it) => it.tag === 'Rappel')).toBe(true);
+    expect(dueDailyQids(srs, log, now)).not.toContain(DAILY[10].questions[0].id);
+    const review = dailyExercise('daily:review', srs, log, now)!;
+    expect(review.generate(1).length).toBe(10);
+    for (const it of items) expect(it.choices!.length).toBe(4);
   });
 });

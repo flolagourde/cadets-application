@@ -36,6 +36,13 @@ export function Library() {
         <p>Fiches datées et sourcées, avec leur quiz</p>
       </header>
       <main className="page">
+        <Link to="/daily" className="card row between" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <span className="grow">
+            <span className="title" style={{ fontWeight: 650 }}>Le fait du jour</span>
+            <span className="muted" style={{ display: 'block' }}>Culture générale et aéronautique, 5 minutes par jour, et l’archive des faits déjà vus</span>
+          </span>
+          <span className="muted">›</span>
+        </Link>
         {(Object.keys(THEMES) as Theme[]).map((theme) => (
           <div className="card" key={theme}>
             <div className="row between">

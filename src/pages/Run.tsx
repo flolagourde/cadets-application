@@ -6,6 +6,7 @@ import { decideLevel, type LevelDecision, median } from '../domain/adaptive';
 import { doneToday, type DayPlan, nextInPlan } from '../domain/plan';
 import type { QStats } from '../content/quiz';
 import { biaExercise, loadPack, loadSrs, recordSrs } from '../domain/bia';
+import { dailyExercise, loadDailyLog, loadDailySrs, recordDaily } from '../domain/daily';
 import { getExercise } from '../exercises/registry';
 import type { ExerciseDef, Item } from '../exercises/types';
 import { Dial, FigureView, fmtMin, fmtSec, Keypad, MatrixCell } from '../ui';
@@ -237,9 +238,13 @@ interface Summary { result: Result; decision: LevelDecision | null; previousLeve
 export default function Run() {
   const { id = '' } = useParams();
   const isBia = id.startsWith('bia:');
+  const isDaily = id.startsWith('daily:');
   const bia = useLiveQuery(async () => (isBia ? { pack: await loadPack(), srs: await loadSrs() } : null), [id]);
+  // lu une seule fois à l'ouverture : la séance ne doit pas changer pendant qu'on y répond
+  const [daily, setDaily] = useState<{ srs: Awaited<ReturnType<typeof loadDailySrs>>; log: Awaited<ReturnType<typeof loadDailyLog>> } | null>(null);
+  useEffect(() => { if (isDaily) void Promise.all([loadDailySrs(), loadDailyLog()]).then(([srs, log]) => setDaily({ srs, log })); }, [id, isDaily]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const def: ExerciseDef | undefined = useMemo(() => (isBia ? (bia ? biaExercise(id, bia.pack, bia.srs) : undefined) : getExercise(id)), [id, bia]);
+  const def: ExerciseDef | undefined = useMemo(() => (isBia ? (bia ? biaExercise(id, bia.pack, bia.srs) : undefined) : isDaily ? (daily ? dailyExercise(id, daily.srs, daily.log) : undefined) : getExercise(id)), [id, bia, daily]);
   const nav = useNavigate();
   const storedLevel = useLiveQuery(async () => (await db.levels.get(id))?.level ?? 1, [id]);
   const todayResults = useLiveQuery(() => db.results.where('source').equals('app').toArray(), []);
@@ -252,7 +257,7 @@ export default function Run() {
 
   useEffect(() => { setPhase('intro'); setSummary(null); }, [id]);
 
-  if (isBia && bia === undefined) return <div className="run" />;
+  if ((isBia && bia === undefined) || (isDaily && !daily)) return <div className="run" />;
   if (!def) {
     return <div className="page"><p>Exercice introuvable.</p><Link className="btn" to="/train">Retour</Link></div>;
   }
@@ -312,6 +317,7 @@ export default function Run() {
       await db.kv.put({ key: 'qstats', value: qs });
     }
     if (isBia && asked.length) await recordSrs(asked.map((l) => ({ qid: l.item.qid!, ok: l.ok })));
+    if (isDaily) await recordDaily(def.id, asked.map((l) => ({ qid: l.item.qid!, ok: l.ok })));
     if (def.noLevel) {
       setSummary({ result, decision: null, previousLevel: level });
       setPhase('done');
@@ -384,7 +390,9 @@ export default function Run() {
               <p>{summary.decision!.reason}</p>
             </div>
           ) : (
-            <div className="card"><p className="muted">Les questions ratées ou jamais vues reviendront en priorité au prochain quiz.</p></div>
+            <div className="card"><p className="muted">{isDaily
+              ? 'Chaque question reviendra en rappel : dans 1 jour si tu l’as ratée, puis de plus en plus tard si tu la réussis (3, 7, 14, 30 jours).'
+              : 'Les questions ratées ou jamais vues reviendront en priorité au prochain quiz.'}</p></div>
           )}
           {summary.result.errors && summary.result.errors.length > 0 && (
             <div className="card">
@@ -400,7 +408,8 @@ export default function Run() {
               </div>
             </div>
           )}
-          {nextId && nextId !== def.id && (
+          {isDaily && <Link className="btn block" to="/daily" replace>Revenir au fait du jour</Link>}
+          {!isDaily && nextId && nextId !== def.id && (
             <Link className="btn block" to={`/run/${nextId}`} replace>Exercice suivant : {getExercise(nextId)?.name}</Link>
           )}
           <div className="grid2">

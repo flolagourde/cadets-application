@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom';
 import { dayKey, db, DEFAULT_SETTINGS, type Settings, SOURCES } from '../db';
 import { DEFAULT_TEST_MINUTES, streak } from '../domain/adaptive';
 import { dueIds, loadPack, loadSrs } from '../domain/bia';
+import { DAILY_THEMES } from '../content/daily';
+import { dailyState, dueDailyQids, loadDailyLog, loadDailySrs } from '../domain/daily';
 import { type DayPlan, doneToday, getOrCreatePlan, nextInPlan } from '../domain/plan';
 import { EXERCISES } from '../exercises/registry';
 import { fmtMin } from '../ui';
@@ -24,6 +26,11 @@ export default function Home() {
     if (!pack) return null;
     const known = new Set(pack.chapters.flatMap((c) => c.parts.flatMap((p) => p.questions.map((q) => q.id))));
     return dueIds(await loadSrs()).filter((id) => known.has(id)).length;
+  }, []);
+  const daily = useLiveQuery(async () => {
+    const [log, srs] = await Promise.all([loadDailyLog(), loadDailySrs()]);
+    const st = dailyState(log);
+    return { st, due: dueDailyQids(srs, log, new Date(), st.doneToday ? undefined : st.fact?.id).length };
   }, []);
   const [plan, setPlan] = useState<DayPlan | null>(null);
 
@@ -58,6 +65,22 @@ export default function Home() {
             <span>{bia === null ? 'Date du BIA à définir' : 'Examen BIA'}</span>
           </Link>
         </div>
+
+        {daily && (
+          <Link to="/daily" className="card row between" style={{ textDecoration: 'none', color: 'inherit' }}>
+            <span className={`check ${daily.st.doneToday ? 'done' : ''}`}>{daily.st.doneToday ? '✓' : ''}</span>
+            <span className="grow">
+              <span className="title" style={{ fontWeight: 650 }}>Le fait du jour</span>
+              <span className="muted" style={{ display: 'block' }}>
+                {daily.st.fact
+                  ? `${DAILY_THEMES[daily.st.fact.theme]} · ${daily.st.doneToday ? 'terminé' : daily.st.fact.title}`
+                  : 'Lot terminé'}
+                {daily.due ? ` · ${daily.due} rappel${daily.due > 1 ? 's' : ''}` : ''}
+              </span>
+            </span>
+            <span className="muted small">5 min</span>
+          </Link>
+        )}
 
         <div className="card stack">
           <div className="row between">

@@ -1,5 +1,6 @@
 import { HashRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { BiaHome, BiaPartView } from './pages/Bia';
+import { DailyHome, DailyView } from './pages/Daily';
 import Home from './pages/Home';
 import { FicheView, Library } from './pages/Library';
 import Progress from './pages/Progress';
@@ -38,6 +39,8 @@ function Shell() {
         <Route path="/run/:id" element={<Run />} />
         <Route path="/bia" element={<BiaHome />} />
         <Route path="/bia/:id" element={<BiaPartView />} />
+        <Route path="/daily" element={<DailyHome />} />
+        <Route path="/daily/:id" element={<DailyView />} />
         <Route path="/library" element={<Library />} />
         <Route path="/library/:id" element={<FicheView />} />
         <Route path="/progress" element={<Progress />} />

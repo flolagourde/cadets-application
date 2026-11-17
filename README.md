@@ -18,6 +18,10 @@ Toutes les données restent sur l'appareil (IndexedDB) : aucun compte, aucun ser
   importé dans l'onglet BIA et stocké sur l'appareil. Fiches par partie avec renvoi aux pages du livret, questionnaires
   par partie ou par matière, révisions espacées (1, 3, 7, 14, 30 jours), examen blanc au format officiel
   (20 questions par matière, 90 secondes par question, aucune correction avant la fin), note sur 20 et détail par matière.
+- **Le fait du jour** : une fiche courte et deux questions par jour (environ 5 minutes), par lots de 60 jours :
+  2 jours par semaine d'aéronautique et Air France, le reste en rotation (histoire, géopolitique, sciences, arts et
+  littérature, religions et philosophie, géographie). Les questions reviennent ensuite en rappels espacés
+  (1, 3, 7, 14, 30 jours). Contenus dans `src/content/daily.ts`, moteur dans `src/domain/daily.ts`.
 - **Données** : tout reste sur l'appareil. Sauvegarde et restauration, chiffrement AES-256-GCM facultatif.
 - Installable et utilisable hors connexion.
 

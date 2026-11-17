@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 
 /** Domaines de compétence suivis par l'application. */
-export type CategoryId = 'calcul' | 'memoire' | 'attention' | 'logique' | 'spatial' | 'aero' | 'anglais' | 'bia';
+export type CategoryId = 'calcul' | 'memoire' | 'attention' | 'logique' | 'spatial' | 'aero' | 'anglais' | 'bia' | 'culture';
 
 export const CATEGORIES: Record<CategoryId, string> = {
   calcul: 'Calcul mental',
@@ -12,6 +12,7 @@ export const CATEGORIES: Record<CategoryId, string> = {
   aero: 'Culture aéronautique',
   anglais: 'Anglais',
   bia: 'BIA',
+  culture: 'Culture générale',
 };
 
 /** Provenance d'un résultat : jamais mélangées dans les statistiques. */
